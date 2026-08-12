@@ -52,7 +52,12 @@ export default function Gestao({ usuarios, setUsuarios, chats, modoAuth, onRemov
         setUsuarios(usuarios.filter(u => u.id !== id));
       }
     } catch (e) {
-      setErroRemover(e instanceof Error ? e.message : "Não foi possível remover o membro.");
+      const msg =
+        e instanceof Error ? e.message :
+        (e && typeof e === "object" && "message" in e && typeof (e as { message: unknown }).message === "string")
+          ? (e as { message: string }).message
+          : "Não foi possível remover o membro.";
+      setErroRemover(msg === "[object Object]" ? "Não foi possível remover o membro." : msg);
     } finally {
       setRemovendoId(null);
     }

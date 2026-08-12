@@ -66,6 +66,13 @@ export default function App() {
       if (s) {
         try {
           const [meu, todos] = await Promise.all([buscarPerfil(sb, s.user.id), listarEquipe(sb)]);
+          if (meu && meu.ativo === false) {
+            await sair(sb);
+            setSessao(null);
+            setMeuPerfilDB(null);
+            setEquipeDB([]);
+            return;
+          }
           setMeuPerfilDB(meu);
           setEquipeDB(todos);
         } catch { /* perfis ainda não migrados */ }

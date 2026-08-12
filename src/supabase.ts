@@ -34,6 +34,7 @@ export interface PerfilDB {
   setor: Setor | null;
   telefone: string | null;
   online: boolean;
+  ativo?: boolean;
   criado_em: string;
 }
 
@@ -72,8 +73,13 @@ export async function buscarPerfil(sb: SupabaseClient, id: string): Promise<Perf
 }
 
 export async function listarEquipe(sb: SupabaseClient): Promise<PerfilDB[]> {
-  const { data, error } = await sb.from("perfis").select("*").order("criado_em");
-  if (error) throw error;
+  const { data, error } = await sb.from("perfis").select("*").eq("ativo", true).order("criado_em");
+  if (error) {
+    // Compat: se a coluna ativo ainda não existir, lista tudo
+    const fallback = await sb.from("perfis").select("*").order("criado_em");
+    if (fallback.error) throw error;
+    return (fallback.data ?? []) as PerfilDB[];
+  }
   return (data ?? []) as PerfilDB[];
 }
 
@@ -85,7 +91,7 @@ export async function salvarPerfil(
   if (error) throw error;
 }
 
-/** Remove membro da equipe (apenas admin). Apaga auth.users + perfil em cascata. */
+/** Remove membro da equipe (apenas admin). Soft-delete + encerra sessões. */
 export async function removerMembro(sb: SupabaseClient, targetId: string) {
   const { error } = await sb.rpc("remover_membro", { target_id: targetId });
   if (error) throw error;
@@ -99,7 +105,22 @@ export function aoMudarSessao(sb: SupabaseClient, cb: (s: Session | null) => voi
 
 // Traduz erros comuns do Supabase Auth para pt-BR
 export function traduzErro(e: unknown): string {
-  const m = e instanceof Error ? e.message : String(e);
+  let m = "";
+  if (typeof e === "string") m = e;
+  else if (e instanceof Error) m = e.message;
+  else if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    if (typeof o.message === "string") m = o.message;
+    else if (typeof o.error_description === "string") m = o.error_description;
+    else if (typeof o.msg === "string") m = o.msg;
+    else {
+      try { m = JSON.stringify(e); } catch { m = "Erro desconhecido."; }
+    }
+  } else {
+    m = String(e);
+  }
+  if (!m || m === "[object Object]") m = "Não foi possível concluir a operação.";
+
   const mapa: [string, string][] = [
     ["Invalid login credentials", "E-mail ou senha incorretos."],
     ["Email not confirmed", "E-mail ainda não confirmado. Verifique sua caixa de entrada."],
@@ -107,6 +128,12 @@ export function traduzErro(e: unknown): string {
     ["Password should be at least", "A senha precisa ter no mínimo 6 caracteres."],
     ["valid email", "Informe um e-mail válido."],
     ["rate limit", "Muitas tentativas. Aguarde um instante e tente novamente."],
+    ["permission denied", "Sem permissão para esta ação."],
+    ["Não autenticado", "Sessão expirada. Entre novamente."],
+    ["Apenas administradores", "Apenas administradores podem remover membros."],
+    ["não pode remover a si mesmo", "Você não pode remover a si mesmo."],
+    ["Não é permitido remover outro administrador", "Não é permitido remover outro administrador."],
+    ["Membro não encontrado", "Membro não encontrado ou já removido."],
   ];
   for (const [en, pt] of mapa) if (m.includes(en)) return pt;
   return m;
