@@ -11,6 +11,16 @@ const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 
 const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA"];
 
+// Quando o lead escolhe a empresa, notifica este WhatsApp e encerra a triagem antecipada
+const ESPECIALISTAS = {
+  IPROTECTOR: {
+    wa: "5511943870655",
+    setor: "Comercial",
+    msgCliente:
+      "Perfeito! Um especialista da *IPROTECTOR* vai entrar em contato com você em breve. ⏳",
+  },
+};
+
 const PERGUNTA_BOAS_VINDAS =
   "Olá! 👋 Bem-vindo(a) ao atendimento do Grupo FIC. Sou o assistente virtual. Para começar, qual o seu nome?";
 const PERGUNTA_EMPRESA =
@@ -26,6 +36,44 @@ const REGRAS = [
   { destino: "Jurídico", kws: ["contrato", "cláusula", "clausula", "processo", "rescisão", "rescisao", "jurídico", "juridico", "advogado"] },
 ];
 const SETOR_PADRAO = "Atendimento";
+
+async function responderCliente(conversaId, waId, texto) {
+  const envio = await enviarWhatsApp(waId, texto);
+  await salvarMsg(conversaId, "bot", texto);
+  if (!envio.ok) {
+    await salvarMsg(conversaId, "sistema", "Falha ao enviar no WhatsApp: verifique token e Phone Number ID.");
+  }
+  return envio;
+}
+
+async function encaminharEspecialista(conversa, empresa, especial) {
+  const nome = conversa.nome_cliente || "Cliente";
+  const telCliente = conversa.wa_id?.startsWith("55") ? `+${conversa.wa_id}` : conversa.wa_id;
+
+  await responderCliente(conversa.id, conversa.wa_id, especial.msgCliente);
+
+  const avisoEsp =
+    `🔔 *Novo lead ${empresa}*\n\n` +
+    `Nome: ${nome}\n` +
+    `WhatsApp: ${telCliente}\n` +
+    `Empresa: ${empresa}\n\n` +
+    `Abra a Rotea para atender:\nhttps://roteabot.vercel.app`;
+
+  const envioEsp = await enviarWhatsApp(especial.wa, avisoEsp);
+  if (envioEsp.ok) {
+    await salvarMsg(conversa.id, "sistema", `Lead IProtector notificado para +${especial.wa}`);
+  } else {
+    await salvarMsg(conversa.id, "sistema", `Falha ao notificar especialista +${especial.wa}. Lead ficou na fila da Rotea.`);
+  }
+
+  await atualizarConversa(conversa.id, {
+    etapa: 4,
+    empresa,
+    setor: especial.setor,
+    status: "fila",
+    assunto: `Contato ${empresa} — especialista notificado`,
+  });
+}
 
 function secret() {
   return process.env.WEBHOOK_SECRET || process.env.VERIFY_TOKEN || "";
@@ -137,46 +185,29 @@ export default async function handler(req, res) {
     }
 
     if (conversa.etapa === 0) {
-      const envio = await enviarWhatsApp(waId, PERGUNTA_BOAS_VINDAS);
-      await salvarMsg(conversa.id, "bot", PERGUNTA_BOAS_VINDAS);
-      if (!envio.ok) {
-        await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número. Gere um novo token na API Setup da Meta.");
-      }
+      await responderCliente(conversa.id, waId, PERGUNTA_BOAS_VINDAS);
       await atualizarConversa(conversa.id, { etapa: 1, status: "bot" });
     } else if (conversa.etapa === 1) {
       const nome = texto.trim().slice(0, 80);
-      const envio = await enviarWhatsApp(waId, PERGUNTA_EMPRESA);
-      await salvarMsg(conversa.id, "bot", PERGUNTA_EMPRESA);
-      if (!envio.ok) {
-        await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número.");
-      }
+      await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
       await atualizarConversa(conversa.id, { etapa: 2, nome_cliente: nome });
     } else if (conversa.etapa === 2) {
       const empresa = detectarEmpresa(texto);
       if (!empresa) {
-        const aviso = "Não identifiquei a empresa. " + PERGUNTA_EMPRESA;
-        const envio = await enviarWhatsApp(waId, aviso);
-        await salvarMsg(conversa.id, "bot", aviso);
-        if (!envio.ok) {
-          await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número.");
-        }
+        await responderCliente(conversa.id, waId, "Não identifiquei a empresa. " + PERGUNTA_EMPRESA);
+      } else if (ESPECIALISTAS[empresa]) {
+        // IProtector (e outras com especialista): avisa o lead e notifica o número responsável
+        await atualizarConversa(conversa.id, { empresa, nome_cliente: conversa.nome_cliente });
+        const atualizada = { ...conversa, empresa };
+        await encaminharEspecialista(atualizada, empresa, ESPECIALISTAS[empresa]);
       } else {
         const p = PERGUNTA_ASSUNTO((conversa.nome_cliente || "").split(" ")[0] || "tudo bem");
-        const envio = await enviarWhatsApp(waId, p);
-        await salvarMsg(conversa.id, "bot", p);
-        if (!envio.ok) {
-          await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número.");
-        }
+        await responderCliente(conversa.id, waId, p);
         await atualizarConversa(conversa.id, { etapa: 3, empresa });
       }
     } else if (conversa.etapa === 3) {
       const setor = rotear(texto);
-      const confirma = MSG_FILA(setor);
-      const envio = await enviarWhatsApp(waId, confirma);
-      await salvarMsg(conversa.id, "bot", confirma);
-      if (!envio.ok) {
-        await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número.");
-      }
+      await responderCliente(conversa.id, waId, MSG_FILA(setor));
       await salvarMsg(conversa.id, "sistema", `Regra aplicada · empresa ${conversa.empresa} · encaminhado para fila ${setor}`);
       await atualizarConversa(conversa.id, { etapa: 4, assunto: texto.slice(0, 300), setor, status: "fila" });
     }
