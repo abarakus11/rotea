@@ -1,9 +1,12 @@
 // ============================================================
 // ROTEA · Webhook da API oficial do WhatsApp (Meta Cloud API)
 // Número: +55 11 5304-9387
-// Fluxo: boas-vindas → nome → empresa → assunto → roteamento
-// Env (Vercel → rotea-webhook):
-//   WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, WEBHOOK_SECRET
+// Fluxo:
+//   0 → boas-vindas (pede nome)
+//   1 → nome (pede empresa)
+//   2 → empresa (envia sobre + serviços + menu de intenção)
+//   3 → intenção (contratar / atendente / site)
+// Env: WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, WEBHOOK_SECRET
 // ============================================================
 
 const SUPABASE_URL = "https://wuuijbetsckjusnvdxts.supabase.co";
@@ -11,43 +14,89 @@ const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 
 const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA"];
 
-// Quando o lead escolhe a empresa, notifica este WhatsApp e encerra a triagem antecipada
-const ESPECIALISTAS = {
+/**
+ * Conteúdo por empresa — edite "sobre", "servicos" e "site".
+ * Quando o cliente escolher a empresa, o bot envia essa apresentação
+ * e depois o menu: contratar / atendente / site.
+ */
+const EMPRESAS_INFO = {
   RWB: {
-    wa: "556799797227",
+    nome: "RWB",
+    sobre:
+      "A *RWB* faz parte do Grupo FIC. Aqui entram a descrição oficial da empresa, missão e diferenciais.\n\n_(Conteúdo provisório — substituir pelo texto definitivo.)_",
+    servicos: [
+      "Serviço 1 — descrição breve do serviço",
+      "Serviço 2 — descrição breve do serviço",
+      "Serviço 3 — descrição breve do serviço",
+    ],
+    site: "https://www.grupo-fic.com.br",
+    especialistaWa: "556799797227",
     setor: "Comercial",
-    msgCliente:
-      "Perfeito! Um especialista da *RWB* vai entrar em contato com você em breve. ⏳",
   },
   "LIV ECO HABITATS": {
-    wa: "5514997790770",
+    nome: "LIV ECO HABITATS",
+    sobre:
+      "A *LIV ECO HABITATS* faz parte do Grupo FIC. Aqui entram a descrição oficial da empresa, missão e diferenciais.\n\n_(Conteúdo provisório — substituir pelo texto definitivo.)_",
+    servicos: [
+      "Serviço 1 — descrição breve do serviço",
+      "Serviço 2 — descrição breve do serviço",
+      "Serviço 3 — descrição breve do serviço",
+    ],
+    site: "https://www.grupo-fic.com.br",
+    especialistaWa: "5514997790770",
     setor: "Comercial",
-    msgCliente:
-      "Perfeito! Um especialista da *LIV ECO HABITATS* vai entrar em contato com você em breve. ⏳",
   },
   IPROTECTOR: {
-    wa: "5511943870655",
+    nome: "IPROTECTOR",
+    sobre:
+      "A *IPROTECTOR* faz parte do Grupo FIC. Aqui entram a descrição oficial da empresa, missão e diferenciais.\n\n_(Conteúdo provisório — substituir pelo texto definitivo.)_",
+    servicos: [
+      "Serviço 1 — descrição breve do serviço",
+      "Serviço 2 — descrição breve do serviço",
+      "Serviço 3 — descrição breve do serviço",
+    ],
+    site: "https://www.grupo-fic.com.br",
+    especialistaWa: "5511943870655",
     setor: "Comercial",
-    msgCliente:
-      "Perfeito! Um especialista da *IPROTECTOR* vai entrar em contato com você em breve. ⏳",
   },
   LEGALCERT: {
-    wa: "551151946830",
+    nome: "LEGALCERT",
+    sobre:
+      "A *LEGALCERT* faz parte do Grupo FIC. Aqui entram a descrição oficial da empresa, missão e diferenciais.\n\n_(Conteúdo provisório — substituir pelo texto definitivo.)_",
+    servicos: [
+      "Serviço 1 — descrição breve do serviço",
+      "Serviço 2 — descrição breve do serviço",
+      "Serviço 3 — descrição breve do serviço",
+    ],
+    site: "https://www.grupo-fic.com.br",
+    especialistaWa: "551151946830",
     setor: "Comercial",
-    msgCliente:
-      "Perfeito! Um especialista da *LEGALCERT* vai entrar em contato com você em breve. ⏳",
   },
   SINATRA: {
-    wa: "5511947930224",
+    nome: "SINATRA",
+    sobre:
+      "A *SINATRA* faz parte do Grupo FIC. Aqui entram a descrição oficial da empresa, missão e diferenciais.\n\n_(Conteúdo provisório — substituir pelo texto definitivo.)_",
+    servicos: [
+      "Serviço 1 — descrição breve do serviço",
+      "Serviço 2 — descrição breve do serviço",
+      "Serviço 3 — descrição breve do serviço",
+    ],
+    site: "https://www.grupo-fic.com.br",
+    especialistaWa: "5511947930224",
     setor: "Comercial",
-    msgCliente:
-      "Perfeito! Um especialista da *SINATRA* vai entrar em contato com você em breve. ⏳",
   },
   ANIMA: {
-    wa: "5511943870655",
+    nome: "ANIMA",
+    sobre:
+      "A *ANIMA* faz parte do Grupo FIC. Aqui entram a descrição oficial da empresa, missão e diferenciais.\n\n_(Conteúdo provisório — substituir pelo texto definitivo.)_",
+    servicos: [
+      "Serviço 1 — descrição breve do serviço",
+      "Serviço 2 — descrição breve do serviço",
+      "Serviço 3 — descrição breve do serviço",
+    ],
+    site: "https://www.grupo-fic.com.br",
+    especialistaWa: "5511943870655",
     setor: "Comercial",
-    msgCliente:
-      "Perfeito! Um especialista da *ANIMA* vai entrar em contato com você em breve. ⏳",
   },
 };
 
@@ -55,54 +104,37 @@ const PERGUNTA_BOAS_VINDAS =
   "Olá! 👋 Bem-vindo(a) ao atendimento do Grupo FIC. Sou o assistente virtual. Para começar, qual o seu nome?";
 const PERGUNTA_EMPRESA =
   "Sobre qual empresa você gostaria de falar?\n\n1⃣ RWB\n2⃣ LIV ECO HABITATS\n3⃣ IPROTECTOR\n4⃣ LEGALCERT\n5⃣ SINATRA\n6⃣ ANIMA\n\nResponda com o nome ou o número da opção.";
-const PERGUNTA_ASSUNTO = (nome) =>
-  `Certo, ${nome}! Em poucas palavras, como podemos ajudar você hoje?`;
-const MSG_FILA = (setor) =>
-  `Perfeito! Encaminhei você para a nossa equipe de *${setor}*. Um atendente vai falar com você em instantes. ⏳`;
 
-const REGRAS = [
-  { destino: "Comercial", kws: ["comprar", "preço", "preco", "orçamento", "orcamento", "plano", "proposta", "contratar", "investir", "valor"] },
-  { destino: "Tecnologia/Suporte", kws: ["erro", "bug", "não funciona", "nao funciona", "travando", "senha", "acesso", "app", "sistema"] },
-  { destino: "Jurídico", kws: ["contrato", "cláusula", "clausula", "processo", "rescisão", "rescisao", "jurídico", "juridico", "advogado"] },
-];
-const SETOR_PADRAO = "Atendimento";
+const MENU_INTENCAO =
+  "Como você prefere seguir?\n\n" +
+  "1⃣ Contratar serviços\n" +
+  "2⃣ Falar com um atendente\n" +
+  "3⃣ Outras dúvidas — consultar o site\n\n" +
+  "Responda com o número da opção.";
 
-async function responderCliente(conversaId, waId, texto) {
-  const envio = await enviarWhatsApp(waId, texto);
-  await salvarMsg(conversaId, "bot", texto);
-  if (!envio.ok) {
-    await salvarMsg(conversaId, "sistema", "Falha ao enviar no WhatsApp: verifique token e Phone Number ID.");
-  }
-  return envio;
+function montarApresentacao(info) {
+  const lista = info.servicos.map((s, i) => `${i + 1}. ${s}`).join("\n");
+  return (
+    `*${info.nome}*\n\n` +
+    `${info.sobre}\n\n` +
+    `*Serviços prestados:*\n${lista}`
+  );
 }
 
-async function encaminharEspecialista(conversa, empresa, especial) {
-  const nome = conversa.nome_cliente || "Cliente";
-  const telCliente = conversa.wa_id?.startsWith("55") ? `+${conversa.wa_id}` : conversa.wa_id;
+function detectarEmpresa(texto) {
+  const t = texto.trim().toLowerCase();
+  const porNumero = { "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5 };
+  if (porNumero[t] !== undefined) return EMPRESAS[porNumero[t]];
+  return EMPRESAS.find((e) => t.includes(e.toLowerCase())) ?? null;
+}
 
-  await responderCliente(conversa.id, conversa.wa_id, especial.msgCliente);
-
-  const avisoEsp =
-    `🔔 *Novo lead ${empresa}*\n\n` +
-    `Nome: ${nome}\n` +
-    `WhatsApp: ${telCliente}\n` +
-    `Empresa: ${empresa}\n\n` +
-    `Abra a Rotea para atender:\nhttps://roteabot.vercel.app`;
-
-  const envioEsp = await enviarWhatsApp(especial.wa, avisoEsp);
-  if (envioEsp.ok) {
-    await salvarMsg(conversa.id, "sistema", `Lead ${empresa} notificado para +${especial.wa}`);
-  } else {
-    await salvarMsg(conversa.id, "sistema", `Falha ao notificar especialista +${especial.wa}. Lead ficou na fila da Rotea.`);
-  }
-
-  await atualizarConversa(conversa.id, {
-    etapa: 4,
-    empresa,
-    setor: especial.setor,
-    status: "fila",
-    assunto: `Contato ${empresa} — especialista notificado`,
-  });
+/** 1=contratar | 2=atendente | 3=site | null */
+function detectarIntencao(texto) {
+  const t = texto.trim().toLowerCase();
+  if (t === "1" || t.includes("contrat")) return "contratar";
+  if (t === "2" || t.includes("atendent") || t.includes("humano") || t.includes("falar")) return "atendente";
+  if (t === "3" || t.includes("site") || t.includes("dúvida") || t.includes("duvida") || t.includes("consulta")) return "site";
+  return null;
 }
 
 function secret() {
@@ -173,17 +205,54 @@ async function enviarWhatsApp(para, texto) {
   return { ok: true };
 }
 
-function detectarEmpresa(texto) {
-  const t = texto.trim().toLowerCase();
-  const porNumero = { "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5 };
-  if (porNumero[t] !== undefined) return EMPRESAS[porNumero[t]];
-  return EMPRESAS.find((e) => t.includes(e.toLowerCase())) ?? null;
+async function responderCliente(conversaId, waId, texto) {
+  const envio = await enviarWhatsApp(waId, texto);
+  await salvarMsg(conversaId, "bot", texto);
+  if (!envio.ok) {
+    await salvarMsg(conversaId, "sistema", "Falha ao enviar no WhatsApp: verifique token e Phone Number ID.");
+  }
+  return envio;
 }
 
-function rotear(assunto) {
-  const t = assunto.toLowerCase();
-  for (const r of REGRAS) if (r.kws.some((k) => t.includes(k))) return r.destino;
-  return SETOR_PADRAO;
+async function notificarEspecialista(conversa, info, intencao) {
+  const nome = conversa.nome_cliente || "Cliente";
+  const telCliente = conversa.wa_id?.startsWith("55") ? `+${conversa.wa_id}` : conversa.wa_id;
+  const rotulo =
+    intencao === "contratar" ? "Quer contratar serviços" :
+    intencao === "atendente" ? "Quer falar com atendente" :
+    "Contato geral";
+
+  const aviso =
+    `🔔 *Novo lead ${info.nome}*\n\n` +
+    `Nome: ${nome}\n` +
+    `WhatsApp: ${telCliente}\n` +
+    `Empresa: ${info.nome}\n` +
+    `Intenção: ${rotulo}\n\n` +
+    `Abra a Rotea para atender:\nhttps://roteabot.vercel.app`;
+
+  const envio = await enviarWhatsApp(info.especialistaWa, aviso);
+  if (envio.ok) {
+    await salvarMsg(conversa.id, "sistema", `Lead ${info.nome} (${rotulo}) notificado para +${info.especialistaWa}`);
+  } else {
+    await salvarMsg(conversa.id, "sistema", `Falha ao notificar especialista +${info.especialistaWa}. Lead ficou na fila.`);
+  }
+}
+
+async function encaminharParaEspecialista(conversa, info, intencao) {
+  const msgCliente =
+    intencao === "contratar"
+      ? `Ótimo! Um especialista da *${info.nome}* vai entrar em contato para falar sobre contratação. ⏳`
+      : `Perfeito! Um atendente da *${info.nome}* vai falar com você em breve. ⏳`;
+
+  await responderCliente(conversa.id, conversa.wa_id, msgCliente);
+  await notificarEspecialista(conversa, info, intencao);
+  await atualizarConversa(conversa.id, {
+    etapa: 4,
+    empresa: info.nome,
+    setor: info.setor,
+    status: "fila",
+    assunto: `${info.nome} · ${intencao}`,
+  });
 }
 
 export default async function handler(req, res) {
@@ -223,23 +292,38 @@ export default async function handler(req, res) {
       await atualizarConversa(conversa.id, { etapa: 2, nome_cliente: nome });
     } else if (conversa.etapa === 2) {
       const empresa = detectarEmpresa(texto);
-      if (!empresa) {
+      const info = empresa ? EMPRESAS_INFO[empresa] : null;
+      if (!info) {
         await responderCliente(conversa.id, waId, "Não identifiquei a empresa. " + PERGUNTA_EMPRESA);
-      } else if (ESPECIALISTAS[empresa]) {
-        // Empresa com especialista dedicado: avisa o lead e notifica o número responsável
-        await atualizarConversa(conversa.id, { empresa, nome_cliente: conversa.nome_cliente });
-        const atualizada = { ...conversa, empresa };
-        await encaminharEspecialista(atualizada, empresa, ESPECIALISTAS[empresa]);
       } else {
-        const p = PERGUNTA_ASSUNTO((conversa.nome_cliente || "").split(" ")[0] || "tudo bem");
-        await responderCliente(conversa.id, waId, p);
-        await atualizarConversa(conversa.id, { etapa: 3, empresa });
+        // 1) apresentação da empresa + serviços
+        await responderCliente(conversa.id, waId, montarApresentacao(info));
+        // 2) menu de intenção
+        await responderCliente(conversa.id, waId, MENU_INTENCAO);
+        await atualizarConversa(conversa.id, { etapa: 3, empresa: info.nome, status: "bot" });
       }
     } else if (conversa.etapa === 3) {
-      const setor = rotear(texto);
-      await responderCliente(conversa.id, waId, MSG_FILA(setor));
-      await salvarMsg(conversa.id, "sistema", `Regra aplicada · empresa ${conversa.empresa} · encaminhado para fila ${setor}`);
-      await atualizarConversa(conversa.id, { etapa: 4, assunto: texto.slice(0, 300), setor, status: "fila" });
+      const info = EMPRESAS_INFO[conversa.empresa];
+      if (!info) {
+        await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
+        await atualizarConversa(conversa.id, { etapa: 2, empresa: null });
+      } else {
+        const intencao = detectarIntencao(texto);
+        if (!intencao) {
+          await responderCliente(conversa.id, waId, "Não entendi. " + MENU_INTENCAO);
+        } else if (intencao === "site") {
+          const msgSite =
+            `Sem problemas! Para outras dúvidas, consulte o site da *${info.nome}*:\n${info.site}\n\n` +
+            `Se preferir, digite *2* para falar com um atendente.`;
+          await responderCliente(conversa.id, waId, msgSite);
+          await atualizarConversa(conversa.id, {
+            assunto: `${info.nome} · consultou o site`,
+          });
+          // permanece na etapa 3 para poder pedir atendente depois
+        } else {
+          await encaminharParaEspecialista({ ...conversa, wa_id: waId }, info, intencao);
+        }
+      }
     }
 
     return res.status(200).json({ ok: true });
