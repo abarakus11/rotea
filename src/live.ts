@@ -9,7 +9,10 @@ interface ConversaDB {
   status: string; etapa: number; origem: string | null; criado_em: string;
   atualizado_em: string; etiquetas: string[] | null; notas: string[] | null;
 }
-interface MensagemDB { id: string; conversa_id: string; de: string; texto: string; criado_em: string; }
+interface MensagemDB {
+  id: string; conversa_id: string; de: string; texto: string; criado_em: string;
+  tipo?: string | null; media_url?: string | null; mime_type?: string | null;
+}
 
 const hora = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
@@ -46,6 +49,9 @@ export async function carregarConversasLive(sb: SupabaseClient, nomesPorId: Reco
           de: (["cliente", "bot", "atendente", "sistema"].includes(m.de) ? m.de : "sistema") as Msg["de"],
           texto: m.texto,
           hora: hora(m.criado_em),
+          tipo: m.tipo || "text",
+          mediaUrl: m.media_url ?? null,
+          mimeType: m.mime_type ?? null,
         })),
       } satisfies Chat,
       // Fallback JS: última mensagem, senão atualizado_em do banco

@@ -9,6 +9,9 @@ export interface Usuario {
 export interface Msg {
   id: string; de: "cliente" | "bot" | "atendente" | "sistema";
   texto: string; hora: string;
+  tipo?: "text" | "audio" | string;
+  mediaUrl?: string | null;
+  mimeType?: string | null;
 }
 export interface Chat {
   id: string; cliente: string; telefone: string; origem: string;

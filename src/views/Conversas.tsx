@@ -116,7 +116,16 @@ export default function Conversas({ chats, usuario, acoes }: Props) {
                   <span className="f-mono text-[10px]" style={{ color: "var(--az-mut)" }}>{c.inicio}</span>
                 </div>
                 <div className="text-xs truncate mt-0.5" style={{ color: "var(--az-mut)" }}>
-                  {c.msgs[c.msgs.length - 1]?.texto}
+                  {(() => {
+                    const last = c.msgs[c.msgs.length - 1];
+                    if (!last) return "";
+                    if (last.tipo === "audio") {
+                      const t = last.texto?.trim();
+                      if (!t || t === "[Áudio]" || t === "[Áudio recebido]") return "🎤 Áudio";
+                      return `🎤 ${t}`;
+                    }
+                    return last.texto;
+                  })()}
                 </div>
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                   <TagStatus status={c.status} />
@@ -189,7 +198,26 @@ export default function Conversas({ chats, usuario, acoes }: Props) {
                       ? { background: "var(--az-forest)", color: "white", borderBottomRightRadius: 6 }
                       : { background: "var(--az-leaf)", color: "white", borderBottomRightRadius: 6 }}>
                   {m.de === "bot" && <div className="f-mono text-[9px] uppercase tracking-wider opacity-60 mb-0.5">bot · triagem</div>}
-                  <div className="whitespace-pre-line">{m.texto}</div>
+                  {m.tipo === "audio" ? (
+                    <div className="space-y-1.5 min-w-[180px]">
+                      <div className="f-mono text-[10px] opacity-70">🎤 Áudio</div>
+                      {m.mediaUrl ? (
+                        <audio controls preload="metadata" className="w-full max-w-[260px] h-9" src={m.mediaUrl}>
+                          Seu navegador não reproduz áudio.
+                        </audio>
+                      ) : (
+                        <div className="text-xs opacity-80">[Áudio recebido — arquivo indisponível]</div>
+                      )}
+                      {m.texto && m.texto !== "[Áudio]" && m.texto !== "[Áudio recebido]" && (
+                        <div className="whitespace-pre-line text-sm opacity-95 border-t pt-1.5 mt-1"
+                          style={{ borderColor: "rgba(0,0,0,0.08)" }}>
+                          {m.texto}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="whitespace-pre-line">{m.texto}</div>
+                  )}
                   <div className="f-mono text-[9px] mt-1 opacity-60 text-right">{m.hora}</div>
                 </div>
               </div>

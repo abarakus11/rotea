@@ -72,7 +72,16 @@ export default function Filas({ chats, equipe, assumir }: Props) {
                       <TagStatus status={c.status} />
                     </div>
                     <div className="text-[11px] truncate mb-2" style={{ color: "var(--az-mut)" }}>
-                      "{[...c.msgs].reverse().find(m => m.de === "cliente")?.texto ?? "…"}"
+                      {(() => {
+                        const m = [...c.msgs].reverse().find(x => x.de === "cliente");
+                        if (!m) return "…";
+                        if (m.tipo === "audio") {
+                          const t = m.texto?.trim();
+                          if (!t || t === "[Áudio]" || t === "[Áudio recebido]") return "🎤 Áudio";
+                          return `🎤 ${t}`;
+                        }
+                        return `"${m.texto}"`;
+                      })()}
                     </div>
                     {c.status === "fila" && <Botao tam="sm" onClick={() => assumir(c)}>Assumir próximo</Botao>}
                   </div>

@@ -7,6 +7,7 @@
 //   2 → empresa (envia sobre + serviços + menu de intenção)
 //   3 → intenção (contratar / atendente / site)
 // Env: WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, WEBHOOK_SECRET
+// Opcional: OPENAI_API_KEY — transcrição Whisper de áudio (senão só grava o player)
 // ============================================================
 
 const SUPABASE_URL = "https://wuuijbetsckjusnvdxts.supabase.co";
@@ -244,13 +245,113 @@ async function acharOuCriarConversa(waId) {
   return rpc("wa_achar_ou_criar_conversa", { p_secret: secret(), p_wa_id: waId });
 }
 
-async function salvarMsg(conversaId, de, texto) {
-  await rpc("wa_salvar_msg", {
+async function salvarMsg(conversaId, de, texto, extras = {}) {
+  const body = {
     p_secret: secret(),
     p_conversa_id: conversaId,
     p_de: de,
     p_texto: texto,
+  };
+  if (extras.tipo) body.p_tipo = extras.tipo;
+  if (extras.media_url) body.p_media_url = extras.media_url;
+  if (extras.mime_type) body.p_mime_type = extras.mime_type;
+  if (extras.wa_media_id) body.p_wa_media_id = extras.wa_media_id;
+  await rpc("wa_salvar_msg", body);
+}
+
+function extFromMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("mp4") || m.includes("m4a")) return "m4a";
+  if (m.includes("aac")) return "aac";
+  if (m.includes("amr")) return "amr";
+  if (m.includes("webm")) return "webm";
+  if (m.includes("wav")) return "wav";
+  return "ogg";
+}
+
+/** Baixa mídia da Meta Cloud API (id → url → bytes). */
+async function baixarMediaWhatsApp(mediaId) {
+  const token = process.env.WHATSAPP_TOKEN;
+  if (!token || !mediaId) throw new Error("media: token ou id ausente");
+  const meta = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+    headers: { Authorization: `Bearer ${token}` },
   });
+  const metaTxt = await meta.text();
+  if (!meta.ok) throw new Error(`media meta ${meta.status}: ${metaTxt}`);
+  const info = JSON.parse(metaTxt);
+  const url = info.url;
+  const mime = (info.mime_type || "audio/ogg").split(";")[0].trim();
+  if (!url) throw new Error("media: url ausente na Meta");
+  const bin = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!bin.ok) throw new Error(`media download ${bin.status}`);
+  const buffer = Buffer.from(await bin.arrayBuffer());
+  return { buffer, mime, sha256: info.sha256 || null };
+}
+
+/** Envia áudio ao bucket público whatsapp-media. */
+async function uploadWhatsappMedia(path, buffer, contentType) {
+  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/whatsapp-media/${path}`, {
+    method: "POST",
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${ANON_KEY}`,
+      "Content-Type": contentType || "application/octet-stream",
+      "x-upsert": "true",
+    },
+    body: buffer,
+  });
+  const t = await r.text();
+  if (!r.ok) throw new Error(`storage upload: ${t || r.status}`);
+  return `${SUPABASE_URL}/storage/v1/object/public/whatsapp-media/${path}`;
+}
+
+/** Whisper (opcional). Retorna texto ou null se sem chave / falha. */
+async function transcreverAudio(buffer, mimeType) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+  try {
+    const ext = extFromMime(mimeType);
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([new Uint8Array(buffer)], { type: mimeType || "audio/ogg" }),
+      `audio.${ext}`,
+    );
+    form.append("model", "whisper-1");
+    form.append("language", "pt");
+    const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    const body = await r.text();
+    if (!r.ok) {
+      console.error("whisper fail", r.status, body);
+      return null;
+    }
+    const parsed = body ? JSON.parse(body) : null;
+    const texto = (parsed?.text || "").trim();
+    return texto || null;
+  } catch (e) {
+    console.error("whisper error", e);
+    return null;
+  }
+}
+
+function extrairAudioMsg(msg) {
+  if (!msg) return null;
+  const tipo = msg.type;
+  if (tipo === "audio" || tipo === "voice" || tipo === "ptt") {
+    const payload = msg.audio || msg.voice || msg.ptt || null;
+    if (!payload?.id) return null;
+    return {
+      mediaId: payload.id,
+      mime: (payload.mime_type || "audio/ogg").split(";")[0].trim(),
+      voice: Boolean(payload.voice) || tipo === "voice" || tipo === "ptt",
+    };
+  }
+  return null;
 }
 
 async function atualizarConversa(id, patch) {
@@ -488,13 +589,69 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, statuses: true });
     }
     const msg = entry?.messages?.[0];
-    if (!msg || msg.type !== "text") return res.status(200).json({ ok: true });
+    if (!msg) return res.status(200).json({ ok: true });
 
     const waId = msg.from;
-    const texto = msg.text?.body ?? "";
+    const audioInfo = extrairAudioMsg(msg);
+    const isText = msg.type === "text";
+    if (!isText && !audioInfo) return res.status(200).json({ ok: true });
 
     const conversa = await acharOuCriarConversa(waId);
-    await salvarMsg(conversa.id, "cliente", texto);
+    let texto = "";
+
+    if (audioInfo) {
+      let mediaUrl = null;
+      let mime = audioInfo.mime;
+      let transcript = null;
+      try {
+        const { buffer, mime: mimeDl } = await baixarMediaWhatsApp(audioInfo.mediaId);
+        mime = mimeDl || mime;
+        const path = `${conversa.id}/${Date.now()}_${audioInfo.mediaId}.${extFromMime(mime)}`;
+        const uploadMime = mime.startsWith("audio/") ? mime : "application/octet-stream";
+        mediaUrl = await uploadWhatsappMedia(path, buffer, uploadMime);
+        transcript = await transcreverAudio(buffer, mime);
+      } catch (e) {
+        console.error("audio pipeline", e);
+      }
+
+      if (transcript) {
+        texto = transcript;
+        await salvarMsg(conversa.id, "cliente", transcript, {
+          tipo: "audio",
+          media_url: mediaUrl,
+          mime_type: mime,
+          wa_media_id: audioInfo.mediaId,
+        });
+      } else {
+        const placeholder = mediaUrl ? "[Áudio]" : "[Áudio recebido]";
+        await salvarMsg(conversa.id, "cliente", placeholder, {
+          tipo: "audio",
+          media_url: mediaUrl,
+          mime_type: mime,
+          wa_media_id: audioInfo.mediaId,
+        });
+        // Sem transcrição: no fluxo do bot, pede texto para continuar
+        if (conversa.status === "bot") {
+          const temWhisper = Boolean(process.env.OPENAI_API_KEY);
+          await responderCliente(
+            conversa.id,
+            waId,
+            temWhisper
+              ? "Recebi seu áudio, mas não consegui entender. Pode digitar a mensagem?"
+              : "Recebi seu áudio 🎧. Por enquanto, responda por *texto* para eu continuar o atendimento.",
+          );
+        }
+        return res.status(200).json({
+          ok: true,
+          audio: true,
+          media: Boolean(mediaUrl),
+          transcript: false,
+        });
+      }
+    } else {
+      texto = msg.text?.body ?? "";
+      await salvarMsg(conversa.id, "cliente", texto);
+    }
 
     // Sempre que mandar "oi" (ou saudação), reinicia o fluxo do bot
     if (ehReinicio(texto)) {
@@ -509,7 +666,7 @@ export default async function handler(req, res) {
         atendente_id: null,
       });
       await salvarMsg(conversa.id, "sistema", "Fluxo do bot reiniciado pelo cliente");
-      return res.status(200).json({ ok: true, reinicio: true });
+      return res.status(200).json({ ok: true, reinicio: true, audio: Boolean(audioInfo) });
     }
 
     // "retornar ao menu" → volta para a escolha de empresas
@@ -542,11 +699,11 @@ export default async function handler(req, res) {
         });
       }
       await salvarMsg(conversa.id, "sistema", "Cliente retornou ao menu de empresas");
-      return res.status(200).json({ ok: true, menu: true });
+      return res.status(200).json({ ok: true, menu: true, audio: Boolean(audioInfo) });
     }
 
     if (conversa.status === "andamento" || conversa.status === "encerrado") {
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({ ok: true, audio: Boolean(audioInfo) });
     }
 
     if (conversa.etapa === 0) {
@@ -563,9 +720,7 @@ export default async function handler(req, res) {
       if (!info) {
         await responderCliente(conversa.id, waId, "Não identifiquei a empresa. " + PERGUNTA_EMPRESA);
       } else {
-        // 1) apresentação da empresa + serviços
         await responderCliente(conversa.id, waId, montarApresentacao(info));
-        // 2) menu de intenção
         await responderCliente(conversa.id, waId, MENU_INTENCAO);
         await atualizarConversa(conversa.id, { etapa: 3, empresa: info.nome, status: "bot" });
       }
@@ -586,14 +741,17 @@ export default async function handler(req, res) {
           await atualizarConversa(conversa.id, {
             assunto: `${info.nome} · consultou o site`,
           });
-          // permanece na etapa 3 para poder pedir atendente depois
         } else {
           await encaminharParaEspecialista({ ...conversa, wa_id: waId }, info, intencao);
         }
       }
     }
 
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({
+      ok: true,
+      audio: Boolean(audioInfo),
+      transcript: Boolean(audioInfo && texto),
+    });
   } catch (e) {
     console.error("webhook error", e);
     return res.status(200).json({ ok: true });
