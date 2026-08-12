@@ -137,31 +137,46 @@ export default async function handler(req, res) {
     }
 
     if (conversa.etapa === 0) {
-      await enviarWhatsApp(waId, PERGUNTA_BOAS_VINDAS);
+      const envio = await enviarWhatsApp(waId, PERGUNTA_BOAS_VINDAS);
       await salvarMsg(conversa.id, "bot", PERGUNTA_BOAS_VINDAS);
+      if (!envio.ok) {
+        await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número. Gere um novo token na API Setup da Meta.");
+      }
       await atualizarConversa(conversa.id, { etapa: 1, status: "bot" });
     } else if (conversa.etapa === 1) {
       const nome = texto.trim().slice(0, 80);
-      await enviarWhatsApp(waId, PERGUNTA_EMPRESA);
+      const envio = await enviarWhatsApp(waId, PERGUNTA_EMPRESA);
       await salvarMsg(conversa.id, "bot", PERGUNTA_EMPRESA);
+      if (!envio.ok) {
+        await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número.");
+      }
       await atualizarConversa(conversa.id, { etapa: 2, nome_cliente: nome });
     } else if (conversa.etapa === 2) {
       const empresa = detectarEmpresa(texto);
       if (!empresa) {
         const aviso = "Não identifiquei a empresa. " + PERGUNTA_EMPRESA;
-        await enviarWhatsApp(waId, aviso);
+        const envio = await enviarWhatsApp(waId, aviso);
         await salvarMsg(conversa.id, "bot", aviso);
+        if (!envio.ok) {
+          await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número.");
+        }
       } else {
         const p = PERGUNTA_ASSUNTO((conversa.nome_cliente || "").split(" ")[0] || "tudo bem");
-        await enviarWhatsApp(waId, p);
+        const envio = await enviarWhatsApp(waId, p);
         await salvarMsg(conversa.id, "bot", p);
+        if (!envio.ok) {
+          await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número.");
+        }
         await atualizarConversa(conversa.id, { etapa: 3, empresa });
       }
     } else if (conversa.etapa === 3) {
       const setor = rotear(texto);
       const confirma = MSG_FILA(setor);
-      await enviarWhatsApp(waId, confirma);
+      const envio = await enviarWhatsApp(waId, confirma);
       await salvarMsg(conversa.id, "bot", confirma);
+      if (!envio.ok) {
+        await salvarMsg(conversa.id, "sistema", "Falha ao enviar no WhatsApp: token sem permissão neste número.");
+      }
       await salvarMsg(conversa.id, "sistema", `Regra aplicada · empresa ${conversa.empresa} · encaminhado para fila ${setor}`);
       await atualizarConversa(conversa.id, { etapa: 4, assunto: texto.slice(0, 300), setor, status: "fila" });
     }
