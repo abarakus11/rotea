@@ -168,9 +168,33 @@ function ehReinicio(texto) {
   return [
     "oi", "ola", "oie", "oii", "oiii", "oiee",
     "hey", "hello", "hi", "eai", "eae", "fala",
-    "menu", "inicio", "reiniciar", "recomecar", "comecar",
+    "inicio", "reiniciar", "recomecar", "comecar",
     "bom dia", "boa tarde", "boa noite",
-    "voltar", "voltar ao inicio", "comecar de novo", "nova conversa",
+    "voltar ao inicio", "comecar de novo", "nova conversa",
+  ].includes(t);
+}
+
+/** Volta ao menu de empresas (mantém o nome) */
+function ehVoltarMenu(texto) {
+  const t = texto
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[!?.]+$/g, "")
+    .trim();
+  return [
+    "menu",
+    "voltar",
+    "retornar",
+    "retornar menu",
+    "retornar ao menu",
+    "voltar menu",
+    "voltar ao menu",
+    "menu anterior",
+    "outra empresa",
+    "trocar empresa",
+    "empresas",
   ].includes(t);
 }
 
@@ -330,6 +354,39 @@ export default async function handler(req, res) {
       });
       await salvarMsg(conversa.id, "sistema", "Fluxo do bot reiniciado pelo cliente");
       return res.status(200).json({ ok: true, reinicio: true });
+    }
+
+    // "retornar ao menu" → volta para a escolha de empresas
+    if (ehVoltarMenu(texto)) {
+      const nome = conversa.nome_cliente;
+      if (nome) {
+        await responderCliente(
+          conversa.id,
+          waId,
+          `Certo! Voltando ao menu de empresas.`,
+        );
+        await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
+        await atualizarConversa(conversa.id, {
+          etapa: 2,
+          status: "bot",
+          empresa: null,
+          assunto: null,
+          setor: null,
+          atendente_id: null,
+        });
+      } else {
+        await responderCliente(conversa.id, waId, PERGUNTA_BOAS_VINDAS);
+        await atualizarConversa(conversa.id, {
+          etapa: 1,
+          status: "bot",
+          empresa: null,
+          assunto: null,
+          setor: null,
+          atendente_id: null,
+        });
+      }
+      await salvarMsg(conversa.id, "sistema", "Cliente retornou ao menu de empresas");
+      return res.status(200).json({ ok: true, menu: true });
     }
 
     if (conversa.status === "andamento" || conversa.status === "encerrado") {
