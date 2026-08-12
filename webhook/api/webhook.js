@@ -7,8 +7,12 @@
 //   2 → empresa (envia sobre + serviços + menu de intenção)
 //   3 → intenção (contratar / atendente / site)
 // Env: WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, WEBHOOK_SECRET
-// Opcional: OPENAI_API_KEY — transcrição Whisper de áudio (senão só grava o player)
+// Opcional: OPENAI_API_KEY — Whisper (entrada) + TTS (respostas do bot ao cliente)
 // ============================================================
+
+const TTS_VOICE = "nova";
+const TTS_MODEL = "tts-1";
+const TTS_MAX_CHARS = 800;
 
 const SUPABASE_URL = "https://wuuijbetsckjusnvdxts.supabase.co";
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1dWlqYmV0c2NranVzbnZkeHRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5NjAwODAsImV4cCI6MjEwMTUzNjA4MH0.VzHyjS2goE1tX0udysdjnuXcfym39jPkJWc3j-xFYbA";
@@ -354,6 +358,147 @@ function extrairAudioMsg(msg) {
   return null;
 }
 
+/** Remove markdown WhatsApp e limita tamanho para TTS (texto completo ainda vai como mensagem). */
+function textoParaTTS(texto) {
+  let t = String(texto || "")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/~([^~]+)~/g, "$1")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\n{2,}/g, ". ")
+    .replace(/\n/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return "";
+  if (t.length <= TTS_MAX_CHARS) return t;
+  const corte = t.slice(0, TTS_MAX_CHARS);
+  const ultimoEspaco = corte.lastIndexOf(" ");
+  const base = ultimoEspaco > 400 ? corte.slice(0, ultimoEspaco) : corte;
+  return `${base.trim()}…`;
+}
+
+/** OpenAI TTS → bytes MP3. Null se sem chave / falha / texto vazio. */
+async function gerarAudioTTS(texto) {
+  const key = process.env.OPENAI_API_KEY;
+  const input = textoParaTTS(texto);
+  if (!key || !input) return null;
+  try {
+    const r = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: TTS_MODEL,
+        voice: TTS_VOICE,
+        input,
+        response_format: "mp3",
+      }),
+    });
+    if (!r.ok) {
+      const errBody = await r.text();
+      console.error("tts fail", r.status, errBody);
+      return null;
+    }
+    const buffer = Buffer.from(await r.arrayBuffer());
+    if (!buffer.length) return null;
+    return { buffer, mime: "audio/mpeg", ext: "mp3" };
+  } catch (e) {
+    console.error("tts error", e);
+    return null;
+  }
+}
+
+/** Upload multipart para Meta Cloud API → media_id. */
+async function uploadMediaMeta(buffer, mimeType, filename) {
+  const phoneId = process.env.PHONE_NUMBER_ID;
+  const token = process.env.WHATSAPP_TOKEN;
+  if (!phoneId || !token) throw new Error("media upload: credenciais ausentes");
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", mimeType || "audio/mpeg");
+  form.append(
+    "file",
+    new Blob([new Uint8Array(buffer)], { type: mimeType || "audio/mpeg" }),
+    filename || "reply.mp3",
+  );
+  const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/media`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const body = await r.text();
+  if (!r.ok) throw new Error(`meta media upload ${r.status}: ${body}`);
+  const parsed = body ? JSON.parse(body) : null;
+  const mediaId = parsed?.id || null;
+  if (!mediaId) throw new Error(`meta media upload: id ausente (${body})`);
+  return mediaId;
+}
+
+async function enviarWhatsAppAudio(para, mediaId) {
+  const phoneId = process.env.PHONE_NUMBER_ID;
+  const token = process.env.WHATSAPP_TOKEN;
+  if (!phoneId || !token) {
+    return { ok: false, erro: "credenciais ausentes" };
+  }
+  const destino = String(para || "").replace(/\D/g, "");
+  if (!destino || !mediaId) return { ok: false, erro: "destino ou media_id inválido" };
+
+  const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: destino,
+      type: "audio",
+      audio: { id: mediaId },
+    }),
+  });
+  const body = await r.text();
+  let parsed = null;
+  try { parsed = body ? JSON.parse(body) : null; } catch { /* ignore */ }
+  if (!r.ok) {
+    console.error("meta audio send fail", r.status, body);
+    return { ok: false, erro: body, destino };
+  }
+  const wamid = parsed?.messages?.[0]?.id || null;
+  console.log("meta audio send ok", { destino, wamid, mediaId });
+  return { ok: true, destino, wamid, mediaId };
+}
+
+/**
+ * Gera TTS, sobe na Meta e envia áudio. Opcionalmente grava no Storage para o painel.
+ * Falhas são engolidas — o texto já foi (ou será) enviado.
+ */
+async function enviarRespostaAudio(conversaId, waId, texto) {
+  try {
+    const tts = await gerarAudioTTS(texto);
+    if (!tts) return null;
+    const mediaId = await uploadMediaMeta(tts.buffer, tts.mime, `bot_${Date.now()}.${tts.ext}`);
+    const envio = await enviarWhatsAppAudio(waId, mediaId);
+    if (!envio.ok) return null;
+
+    let mediaUrl = null;
+    try {
+      const path = `${conversaId}/bot_${Date.now()}.${tts.ext}`;
+      mediaUrl = await uploadWhatsappMedia(path, tts.buffer, tts.mime);
+    } catch (e) {
+      console.error("tts storage upload", e);
+    }
+    return { mediaId, mediaUrl, mime: tts.mime };
+  } catch (e) {
+    console.error("enviarRespostaAudio", e);
+    return null;
+  }
+}
+
 async function atualizarConversa(id, patch) {
   await rpc("wa_atualizar_conversa", {
     p_secret: secret(),
@@ -399,9 +544,20 @@ async function enviarWhatsApp(para, texto) {
   return { ok: true, destino, waId, wamid };
 }
 
+/** Resposta ao cliente: texto + áudio TTS (falha de TTS não bloqueia o texto). */
 async function responderCliente(conversaId, waId, texto) {
   const envio = await enviarWhatsApp(waId, texto);
-  await salvarMsg(conversaId, "bot", texto);
+  const audio = envio.ok ? await enviarRespostaAudio(conversaId, waId, texto) : null;
+  if (audio?.mediaUrl) {
+    await salvarMsg(conversaId, "bot", texto, {
+      tipo: "audio",
+      media_url: audio.mediaUrl,
+      mime_type: audio.mime || "audio/mpeg",
+      wa_media_id: audio.mediaId || null,
+    });
+  } else {
+    await salvarMsg(conversaId, "bot", texto);
+  }
   if (!envio.ok) {
     await salvarMsg(conversaId, "sistema", "Falha ao enviar no WhatsApp: verifique token e Phone Number ID.");
   }
