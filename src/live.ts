@@ -7,14 +7,14 @@ interface ConversaDB {
   id: string; wa_id: string; nome_cliente: string | null; empresa: string | null;
   assunto: string | null; setor: Setor | null; atendente_id: string | null;
   status: string; etapa: number; origem: string | null; criado_em: string;
-  etiquetas: string[] | null; notas: string[] | null;
+  atualizado_em: string; etiquetas: string[] | null; notas: string[] | null;
 }
 interface MensagemDB { id: string; conversa_id: string; de: string; texto: string; criado_em: string; }
 
 const hora = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
 export async function carregarConversasLive(sb: SupabaseClient, nomesPorId: Record<string, string>): Promise<Chat[]> {
-  const { data: convs, error } = await sb.from("conversas").select("*").order("criado_em", { ascending: false });
+  const { data: convs, error } = await sb.from("conversas").select("*").order("atualizado_em", { ascending: false });
   if (error || !convs) return [];
   const { data: msgs } = await sb.from("mensagens").select("*").order("criado_em", { ascending: true });
   const porConversa: Record<string, MensagemDB[]> = {};
@@ -23,28 +23,38 @@ export async function carregarConversasLive(sb: SupabaseClient, nomesPorId: Reco
   });
   const valida = (s: string): StatusChat =>
     (["bot", "fila", "andamento", "encerrado", "abandonado"].includes(s) ? s : "bot") as StatusChat;
-  return (convs as ConversaDB[]).map(c => ({
-    id: c.id,
-    cliente: c.nome_cliente || `+${c.wa_id}`,
-    telefone: c.wa_id.startsWith("sim_") ? "(conversa de teste)" : `+${c.wa_id}`,
-    origem: c.origem ?? "WhatsApp",
-    empresa: c.empresa ?? undefined,
-    aoVivo: true,
-    setor: c.setor,
-    atendente: c.atendente_id ? (nomesPorId[c.atendente_id] ?? "Atendente") : null,
-    status: valida(c.status),
-    etiquetas: c.etiquetas ?? [],
-    notas: c.notas ?? [],
-    inicio: hora(c.criado_em),
-    espera: Math.max(0, Math.round((Date.now() - new Date(c.criado_em).getTime()) / 60000)),
-    naoLidas: 0,
-    msgs: (porConversa[c.id] ?? []).map(m => ({
-      id: m.id,
-      de: (["cliente", "bot", "atendente", "sistema"].includes(m.de) ? m.de : "sistema") as Msg["de"],
-      texto: m.texto,
-      hora: hora(m.criado_em),
-    })),
-  }));
+  const chats = (convs as ConversaDB[]).map(c => {
+    const msgsConv = porConversa[c.id] ?? [];
+    return {
+      chat: {
+        id: c.id,
+        cliente: c.nome_cliente || `+${c.wa_id}`,
+        telefone: c.wa_id.startsWith("sim_") ? "(conversa de teste)" : `+${c.wa_id}`,
+        origem: c.origem ?? "WhatsApp",
+        empresa: c.empresa ?? undefined,
+        aoVivo: true,
+        setor: c.setor,
+        atendente: c.atendente_id ? (nomesPorId[c.atendente_id] ?? "Atendente") : null,
+        status: valida(c.status),
+        etiquetas: c.etiquetas ?? [],
+        notas: c.notas ?? [],
+        inicio: hora(c.criado_em),
+        espera: Math.max(0, Math.round((Date.now() - new Date(c.criado_em).getTime()) / 60000)),
+        naoLidas: 0,
+        msgs: msgsConv.map(m => ({
+          id: m.id,
+          de: (["cliente", "bot", "atendente", "sistema"].includes(m.de) ? m.de : "sistema") as Msg["de"],
+          texto: m.texto,
+          hora: hora(m.criado_em),
+        })),
+      } satisfies Chat,
+      // Fallback JS: última mensagem, senão atualizado_em do banco
+      ordem: msgsConv[msgsConv.length - 1]?.criado_em ?? c.atualizado_em ?? c.criado_em,
+    };
+  });
+  return chats
+    .sort((a, b) => new Date(b.ordem).getTime() - new Date(a.ordem).getTime())
+    .map(x => x.chat);
 }
 
 export function assinarLive(sb: SupabaseClient, onChange: () => void) {
