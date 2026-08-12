@@ -245,6 +245,9 @@ async function enviarWhatsApp(para, texto) {
     console.error("WHATSAPP_TOKEN ou PHONE_NUMBER_ID ausente");
     return { ok: false, erro: "credenciais ausentes" };
   }
+  const destino = String(para || "").replace(/\D/g, "");
+  if (!destino) return { ok: false, erro: "destino inválido" };
+
   const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
     method: "POST",
     headers: {
@@ -253,17 +256,23 @@ async function enviarWhatsApp(para, texto) {
     },
     body: JSON.stringify({
       messaging_product: "whatsapp",
-      to: para,
+      recipient_type: "individual",
+      to: destino,
       type: "text",
-      text: { body: texto },
+      text: { preview_url: false, body: texto },
     }),
   });
   const body = await r.text();
+  let parsed = null;
+  try { parsed = body ? JSON.parse(body) : null; } catch { /* ignore */ }
   if (!r.ok) {
     console.error("meta send fail", r.status, body);
-    return { ok: false, erro: body };
+    return { ok: false, erro: body, destino };
   }
-  return { ok: true };
+  const wamid = parsed?.messages?.[0]?.id || null;
+  const waId = parsed?.contacts?.[0]?.wa_id || destino;
+  console.log("meta send ok", { destino, waId, wamid });
+  return { ok: true, destino, waId, wamid };
 }
 
 async function responderCliente(conversaId, waId, texto) {
@@ -299,45 +308,58 @@ async function notificarEspecialista(conversa, info, intencao) {
     intencao === "atendente" ? "Quer falar com atendente" :
     "Contato geral";
 
-  const msgs = await buscarUltimasMsgs(conversa.id, 12);
-  const historico = msgs.length
-    ? msgs
-      .filter((m) => m.de === "cliente" || m.de === "bot")
-      .map((m) => {
-        const quem = m.de === "cliente" ? "Cliente" : "Bot";
-        const txt = String(m.texto || "").replace(/\s+/g, " ").slice(0, 120);
-        return `• ${quem}: ${txt}`;
-      })
-      .join("\n")
-    : "• (sem histórico)";
+  // Ping curto primeiro (melhor taxa de entrega)
+  const ping =
+    `🔔 *ROTEA · ${info.nome}*\n` +
+    `${rotulo}\n` +
+    `Cliente: *${nome}*\n` +
+    `WhatsApp: ${telCliente}` +
+    (linkWa ? `\nAbrir: ${linkWa}` : "");
 
-  const aviso =
-    `🔔 *Novo lead — ${info.nome}*\n\n` +
-    `*Nome:* ${nome}\n` +
-    `*WhatsApp:* ${telCliente}\n` +
-    (linkWa ? `*Abrir conversa:* ${linkWa}\n` : "") +
-    `*Empresa:* ${info.nome}\n` +
-    `*Intenção:* ${rotulo}\n\n` +
-    `*Resumo da conversa:*\n${historico}\n\n` +
-    `Atenda o cliente diretamente pelo WhatsApp.`;
-
-  const envio = await enviarWhatsApp(info.especialistaWa, aviso);
-  if (envio.ok) {
-    await salvarMsg(conversa.id, "sistema", `Lead ${info.nome} (${rotulo}) notificado para +${info.especialistaWa}`);
-  } else {
-    await salvarMsg(conversa.id, "sistema", `Falha ao notificar especialista +${info.especialistaWa}. Lead ficou na fila.`);
+  const envioPing = await enviarWhatsApp(info.especialistaWa, ping);
+  if (!envioPing.ok) {
+    await salvarMsg(conversa.id, "sistema", `Falha ao notificar especialista +${info.especialistaWa}: ${String(envioPing.erro || "erro").slice(0, 180)}`);
+    return envioPing;
   }
-  return envio;
+
+  const msgs = await buscarUltimasMsgs(conversa.id, 8);
+  const historico = msgs
+    .filter((m) => m.de === "cliente" || m.de === "bot")
+    .map((m) => {
+      const quem = m.de === "cliente" ? "Cliente" : "Bot";
+      const txt = String(m.texto || "").replace(/\s+/g, " ").slice(0, 100);
+      return `• ${quem}: ${txt}`;
+    })
+    .join("\n");
+
+  if (historico) {
+    await enviarWhatsApp(
+      info.especialistaWa,
+      `📋 *Detalhes do lead ${info.nome}*\nNome: ${nome}\nWhatsApp: ${telCliente}\nIntenção: ${rotulo}\n\n*Resumo:*\n${historico}\n\nAtenda pelo WhatsApp.`,
+    );
+  }
+
+  await salvarMsg(
+    conversa.id,
+    "sistema",
+    `Lead ${info.nome} (${rotulo}) notificado para +${envioPing.waId || info.especialistaWa}` +
+      (envioPing.wamid ? ` · id ${envioPing.wamid}` : ""),
+  );
+  return envioPing;
 }
 
 async function encaminharParaEspecialista(conversa, info, intencao) {
-  const msgCliente =
-    intencao === "contratar"
-      ? `Ótimo! Encaminhei seus dados para um especialista da *${info.nome}*. Em breve alguém fala com você sobre a contratação. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
-      : `Perfeito! Encaminhei seus dados para um atendente da *${info.nome}*. Em breve alguém fala com você. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`;
+  const envio = await notificarEspecialista(conversa, info, intencao);
+
+  const msgCliente = envio.ok
+    ? (
+      intencao === "contratar"
+        ? `Ótimo! Já avisei o especialista da *${info.nome}* no WhatsApp. Em breve alguém fala com você sobre a contratação. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
+        : `Perfeito! Já avisei o atendente da *${info.nome}* no WhatsApp. Em breve alguém fala com você. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
+    )
+    : `Não consegui avisar o especialista agora, mas registrei seu pedido da *${info.nome}*. Em breve retornamos.\n\n_Digite: retornar ao menu_`;
 
   await responderCliente(conversa.id, conversa.wa_id, msgCliente);
-  await notificarEspecialista(conversa, info, intencao);
   await atualizarConversa(conversa.id, {
     etapa: 4,
     empresa: info.nome,
