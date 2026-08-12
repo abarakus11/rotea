@@ -149,10 +149,10 @@ function detectarEmpresa(texto) {
 
 /** 1=contratar | 2=atendente | 3=site | null */
 function detectarIntencao(texto) {
-  const t = texto.trim().toLowerCase();
-  if (t === "1" || t.includes("contrat")) return "contratar";
-  if (t === "2" || t.includes("atendent") || t.includes("humano") || t.includes("falar")) return "atendente";
-  if (t === "3" || t.includes("site") || t.includes("dúvida") || t.includes("duvida") || t.includes("consulta")) return "site";
+  const t = texto.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (t === "1" || t.startsWith("1 ") || t.includes("contrat") || t.includes("servico")) return "contratar";
+  if (t === "2" || t.startsWith("2 ") || t.includes("atendent") || t.includes("humano")) return "atendente";
+  if (t === "3" || t.startsWith("3 ") || t.includes("site") || t.includes("duvida") || t.includes("consulta")) return "site";
   return null;
 }
 
@@ -275,21 +275,51 @@ async function responderCliente(conversaId, waId, texto) {
   return envio;
 }
 
+async function buscarUltimasMsgs(conversaId, limite = 10) {
+  try {
+    const rows = await rpc("wa_ultimas_msgs", {
+      p_secret: secret(),
+      p_conversa_id: conversaId,
+      p_limite: limite,
+    });
+    return Array.isArray(rows) ? rows.slice().reverse() : [];
+  } catch (e) {
+    console.error("wa_ultimas_msgs", e);
+    return [];
+  }
+}
+
 async function notificarEspecialista(conversa, info, intencao) {
   const nome = conversa.nome_cliente || "Cliente";
-  const telCliente = conversa.wa_id?.startsWith("55") ? `+${conversa.wa_id}` : conversa.wa_id;
+  const waDigits = String(conversa.wa_id || "").replace(/\D/g, "");
+  const telCliente = waDigits ? `+${waDigits}` : (conversa.wa_id || "—");
+  const linkWa = waDigits ? `https://wa.me/${waDigits}` : "";
   const rotulo =
-    intencao === "contratar" ? "Quer contratar serviços" :
+    intencao === "contratar" ? "Quer CONTRATAR serviços" :
     intencao === "atendente" ? "Quer falar com atendente" :
     "Contato geral";
 
+  const msgs = await buscarUltimasMsgs(conversa.id, 12);
+  const historico = msgs.length
+    ? msgs
+      .filter((m) => m.de === "cliente" || m.de === "bot")
+      .map((m) => {
+        const quem = m.de === "cliente" ? "Cliente" : "Bot";
+        const txt = String(m.texto || "").replace(/\s+/g, " ").slice(0, 120);
+        return `• ${quem}: ${txt}`;
+      })
+      .join("\n")
+    : "• (sem histórico)";
+
   const aviso =
-    `🔔 *Novo lead ${info.nome}*\n\n` +
-    `Nome: ${nome}\n` +
-    `WhatsApp: ${telCliente}\n` +
-    `Empresa: ${info.nome}\n` +
-    `Intenção: ${rotulo}\n\n` +
-    `Entre em contato com o cliente pelo WhatsApp.`;
+    `🔔 *Novo lead — ${info.nome}*\n\n` +
+    `*Nome:* ${nome}\n` +
+    `*WhatsApp:* ${telCliente}\n` +
+    (linkWa ? `*Abrir conversa:* ${linkWa}\n` : "") +
+    `*Empresa:* ${info.nome}\n` +
+    `*Intenção:* ${rotulo}\n\n` +
+    `*Resumo da conversa:*\n${historico}\n\n` +
+    `Atenda o cliente diretamente pelo WhatsApp.`;
 
   const envio = await enviarWhatsApp(info.especialistaWa, aviso);
   if (envio.ok) {
@@ -297,13 +327,14 @@ async function notificarEspecialista(conversa, info, intencao) {
   } else {
     await salvarMsg(conversa.id, "sistema", `Falha ao notificar especialista +${info.especialistaWa}. Lead ficou na fila.`);
   }
+  return envio;
 }
 
 async function encaminharParaEspecialista(conversa, info, intencao) {
   const msgCliente =
     intencao === "contratar"
-      ? `Ótimo! Um especialista da *${info.nome}* vai entrar em contato para falar sobre contratação. ⏳`
-      : `Perfeito! Um atendente da *${info.nome}* vai falar com você em breve. ⏳`;
+      ? `Ótimo! Encaminhei seus dados para um especialista da *${info.nome}*. Em breve alguém fala com você sobre a contratação. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
+      : `Perfeito! Encaminhei seus dados para um atendente da *${info.nome}*. Em breve alguém fala com você. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`;
 
   await responderCliente(conversa.id, conversa.wa_id, msgCliente);
   await notificarEspecialista(conversa, info, intencao);
@@ -425,7 +456,7 @@ export default async function handler(req, res) {
         } else if (intencao === "site") {
           const msgSite =
             `Sem problemas! Para outras dúvidas, consulte o site da *${info.nome}*:\n${info.site}\n\n` +
-            `Se preferir, digite *2* para falar com um atendente.`;
+            `Se preferir:\n*1* — contratar serviços\n*2* — falar com um atendente\n\nOu digite *retornar ao menu*.`;
           await responderCliente(conversa.id, waId, msgSite);
           await atualizarConversa(conversa.id, {
             assunto: `${info.nome} · consultou o site`,
