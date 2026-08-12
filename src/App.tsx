@@ -6,7 +6,7 @@ import {
 } from "./data";
 import {
   getSupabase, supabaseConfigurado, aoMudarSessao, buscarPerfil,
-  listarEquipe, salvarPerfil, sair, PerfilDB,
+  listarEquipe, salvarPerfil, removerMembro, sair, PerfilDB, traduzErro,
 } from "./supabase";
 import {
   carregarConversasLive, assinarLive, patchConversa, msgSistema,
@@ -139,6 +139,19 @@ export default function App() {
       setDemoUser(novo);
       setUsuariosDemo(prev => prev.map(u => (u.id === novo.id ? novo : u)));
     }
+  };
+
+  const removerDaEquipe = async (id: string) => {
+    if (modoAuth && sb) {
+      try {
+        await removerMembro(sb, id);
+      } catch (e) {
+        throw new Error(traduzErro(e));
+      }
+      setEquipeDB(prev => prev.filter(p => p.id !== id));
+      return;
+    }
+    setUsuariosDemo(prev => prev.filter(u => u.id !== id));
   };
 
   const deslogar = async () => {
@@ -336,7 +349,13 @@ export default function App() {
           {aba === "filas" && <Filas chats={chatsAtivos} equipe={equipe} assumir={acoes.assumir} />}
           {aba === "fluxo" && <Fluxo fluxo={fluxo} setFluxo={setFluxo} />}
           {aba === "gestao" && (
-            <Gestao usuarios={equipe} setUsuarios={setUsuariosDemo} chats={chatsAtivos} modoAuth={modoAuth} />
+            <Gestao
+              usuarios={equipe}
+              setUsuarios={setUsuariosDemo}
+              chats={chatsAtivos}
+              modoAuth={modoAuth}
+              onRemover={removerDaEquipe}
+            />
           )}
           {aba === "perfil" && (
             <Perfil usuario={u} email={modoAuth ? sessao?.user.email ?? null : null}

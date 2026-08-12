@@ -7,6 +7,7 @@ interface Props {
   setUsuarios: (u: Usuario[]) => void;
   chats: Chat[];
   modoAuth: boolean;
+  onRemover?: (id: string) => Promise<void>;
 }
 
 const PERMISSOES: { recurso: string; a: boolean; s: boolean; at: boolean }[] = [
@@ -20,10 +21,12 @@ const PERMISSOES: { recurso: string; a: boolean; s: boolean; at: boolean }[] = [
   { recurso: "Logs e trilha de auditoria", a: true, s: false, at: false },
 ];
 
-export default function Gestao({ usuarios, setUsuarios, chats, modoAuth }: Props) {
+export default function Gestao({ usuarios, setUsuarios, chats, modoAuth, onRemover }: Props) {
   const [nome, setNome] = useState("");
   const [perfil, setPerfil] = useState<Perfil>("Atendente");
   const [setor, setSetor] = useState<Setor>("Atendimento");
+  const [removendoId, setRemovendoId] = useState<string | null>(null);
+  const [erroRemover, setErroRemover] = useState<string | null>(null);
 
   const adicionar = () => {
     if (!nome.trim()) return;
@@ -38,7 +41,22 @@ export default function Gestao({ usuarios, setUsuarios, chats, modoAuth }: Props
   const alternarOnline = (id: string) =>
     setUsuarios(usuarios.map(u => (u.id === id ? { ...u, online: !u.online } : u)));
 
-  const removerUsuario = (id: string) => setUsuarios(usuarios.filter(u => u.id !== id));
+  const removerUsuario = async (id: string, nomeMembro: string) => {
+    if (!window.confirm(`Remover ${nomeMembro} da equipe? Esta ação não pode ser desfeita.`)) return;
+    setErroRemover(null);
+    setRemovendoId(id);
+    try {
+      if (onRemover) {
+        await onRemover(id);
+      } else {
+        setUsuarios(usuarios.filter(u => u.id !== id));
+      }
+    } catch (e) {
+      setErroRemover(e instanceof Error ? e.message : "Não foi possível remover o membro.");
+    } finally {
+      setRemovendoId(null);
+    }
+  };
 
   return (
     <div className="p-5 space-y-4 az-in max-w-6xl">
@@ -70,6 +88,11 @@ export default function Gestao({ usuarios, setUsuarios, chats, modoAuth }: Props
             <div className="mb-3 p-2.5 rounded-lg text-xs" style={{ background: "var(--az-leaf-soft)", color: "var(--az-forest)" }}>
               Com o Supabase ativo, novos usuários entram pela tela de cadastro (e-mail + confirmação).
               Aqui um administrador ajusta perfil de acesso e setor de cada membro.
+            </div>
+          )}
+          {erroRemover && (
+            <div className="mb-3 p-2.5 rounded-lg text-xs" style={{ background: "#FDECEA", color: "var(--az-clay)" }}>
+              {erroRemover}
             </div>
           )}
           {!modoAuth && <div className="flex gap-2 mb-3 flex-wrap">
@@ -106,7 +129,15 @@ export default function Gestao({ usuarios, setUsuarios, chats, modoAuth }: Props
                   {u.online ? "● online" : "○ offline"}
                 </button>
                 {u.perfil !== "Administrador" && (
-                  <button onClick={() => removerUsuario(u.id)} className="text-xs" style={{ color: "var(--az-clay)" }}>remover</button>
+                  <button
+                    type="button"
+                    disabled={removendoId === u.id}
+                    onClick={() => removerUsuario(u.id, u.nome)}
+                    className="text-xs disabled:opacity-50"
+                    style={{ color: "var(--az-clay)" }}
+                  >
+                    {removendoId === u.id ? "removendo…" : "remover"}
+                  </button>
                 )}
               </div>
             ))}

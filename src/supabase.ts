@@ -85,6 +85,12 @@ export async function salvarPerfil(
   if (error) throw error;
 }
 
+/** Remove membro da equipe (apenas admin). Apaga auth.users + perfil em cascata. */
+export async function removerMembro(sb: SupabaseClient, targetId: string) {
+  const { error } = await sb.rpc("remover_membro", { target_id: targetId });
+  if (error) throw error;
+}
+
 export function aoMudarSessao(sb: SupabaseClient, cb: (s: Session | null) => void) {
   sb.auth.getSession().then(({ data }) => cb(data.session));
   const { data } = sb.auth.onAuthStateChange((_ev, s) => cb(s));

@@ -1,0 +1,10 @@
+﻿---
+description: Após alterações no Rotea, fazer commit e push automaticamente
+alwaysApply: true
+---
+
+# Rotea — commit e push automáticos
+
+Após concluir cada pedido do usuário que gerar alterações de código/conteúdo neste repositório (`abarakus11/rotea`), fazer **commit + push automaticamente** sem pedir confirmação, seguindo o protocolo git seguro (sem secrets, sem force em master/main, mensagem focada no porquê).
+
+O projeto está na Vercel e no GitHub; o push dispara o deploy.
