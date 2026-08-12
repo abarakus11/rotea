@@ -1,5 +1,5 @@
 import React from "react";
-import { Setor, CORES_SETOR, StatusChat } from "./data";
+import { Setor, CORES_SETOR, StatusChat, Empresa, CORES_EMPRESA, EMPRESAS } from "./data";
 
 export function TagSetor({ setor, mini }: { setor: Setor; mini?: boolean }) {
   const c = CORES_SETOR[setor];
@@ -8,6 +8,20 @@ export function TagSetor({ setor, mini }: { setor: Setor; mini?: boolean }) {
       style={{ background: `color-mix(in srgb, ${c} 12%, white)`, color: `color-mix(in srgb, ${c} 80%, black)` }}>
       <span className="w-1.5 h-1.5 rounded-full" style={{ background: c }} />
       {setor}
+    </span>
+  );
+}
+
+export function TagEmpresa({ empresa, mini }: { empresa: string; mini?: boolean }) {
+  const nome = (EMPRESAS as readonly string[]).includes(empresa) ? (empresa as Empresa) : null;
+  const c = nome ? CORES_EMPRESA[nome] : "#6B7280";
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full font-semibold tracking-wide ${mini ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-1 text-xs"}`}
+      style={{ background: `color-mix(in srgb, ${c} 14%, white)`, color: `color-mix(in srgb, ${c} 85%, black)` }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c }} />
+      {empresa}
     </span>
   );
 }

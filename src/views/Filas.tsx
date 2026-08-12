@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Chat, Usuario, SETORES, CORES_SETOR } from "../data";
-import { TagStatus, Avatar, Botao } from "../ui";
+import { TagStatus, TagEmpresa, Avatar, Botao } from "../ui";
 
 interface Props {
   chats: Chat[];
@@ -64,8 +64,9 @@ export default function Filas({ chats, equipe, assumir }: Props) {
                       <Avatar nome={c.cliente} tam={26} />
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-semibold truncate">{c.cliente}</div>
-                        <div className="f-mono text-[10px]" style={{ color: c.espera > 5 ? "var(--az-clay)" : "var(--az-mut)" }}>
-                          aguardando {c.espera} min{c.empresa ? ` · ${c.empresa}` : ""}
+                        <div className="f-mono text-[10px] flex items-center gap-1.5 flex-wrap" style={{ color: c.espera > 5 ? "var(--az-clay)" : "var(--az-mut)" }}>
+                          <span>aguardando {c.espera} min</span>
+                          {c.empresa && <TagEmpresa empresa={c.empresa} mini />}
                         </div>
                       </div>
                       <TagStatus status={c.status} />

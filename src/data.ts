@@ -26,13 +26,23 @@ export interface NoFluxo {
 
 export const SETORES: Setor[] = ["Comercial", "Tecnologia/Suporte", "Atendimento", "Jurídico"];
 
-export const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA"];
+export const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA"] as const;
+export type Empresa = (typeof EMPRESAS)[number];
 
 export const CORES_SETOR: Record<Setor, string> = {
   "Comercial": "#1FA860",
   "Tecnologia/Suporte": "#2E7CD6",
   "Atendimento": "#E19A2E",
   "Jurídico": "#8A5CC8",
+};
+
+export const CORES_EMPRESA: Record<Empresa, string> = {
+  "RWB": "#0B6E4F",
+  "LIV ECO HABITATS": "#5B8C2A",
+  "IPROTECTOR": "#1F6FEB",
+  "LEGALCERT": "#C45C26",
+  "SINATRA": "#7A3E9D",
+  "ANIMA": "#C6284A",
 };
 
 export const ETIQUETAS_DISPONIVEIS = [

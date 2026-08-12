@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Chat, Usuario, Setor, SETORES, ETIQUETAS_DISPONIVEIS, StatusChat } from "../data";
-import { TagSetor, TagStatus, Avatar, Botao } from "../ui";
+import { TagSetor, TagStatus, TagEmpresa, Avatar, Botao } from "../ui";
 
 export interface AcoesChat {
   enviar: (c: Chat, texto: string) => void;
@@ -120,6 +120,7 @@ export default function Conversas({ chats, usuario, acoes }: Props) {
                 </div>
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                   <TagStatus status={c.status} />
+                  {c.empresa && <TagEmpresa empresa={c.empresa} mini />}
                   {c.setor && <TagSetor setor={c.setor} mini />}
                   <BadgeVivo c={c} />
                   {c.naoLidas > 0 && (
@@ -140,8 +141,16 @@ export default function Conversas({ chats, usuario, acoes }: Props) {
             <Avatar nome={sel.cliente} tam={38} />
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold flex items-center gap-2">{sel.cliente} <BadgeVivo c={sel} /></div>
-              <div className="f-mono text-[11px]" style={{ color: "var(--az-mut)" }}>
-                {sel.telefone} · {sel.origem}{sel.empresa ? ` · ${sel.empresa}` : ""}
+              <div className="f-mono text-[11px] flex items-center gap-1.5 flex-wrap" style={{ color: "var(--az-mut)" }}>
+                <span>{sel.telefone}</span>
+                <span>·</span>
+                <span>{sel.origem}</span>
+                {sel.empresa && (
+                  <>
+                    <span>·</span>
+                    <TagEmpresa empresa={sel.empresa} mini />
+                  </>
+                )}
               </div>
             </div>
             <TagStatus status={sel.status} />
@@ -221,7 +230,15 @@ export default function Conversas({ chats, usuario, acoes }: Props) {
           <div>
             <div className="text-[11px] uppercase tracking-wider font-semibold mb-2" style={{ color: "var(--az-mut)" }}>Dados do lead</div>
             <div className="space-y-1.5 text-xs">
-              {[["Origem", sel.origem], ["Empresa", sel.empresa ?? "—"], ["Início", sel.inicio], ["Espera", `${sel.espera} min`],
+              <div className="flex justify-between gap-2 items-center">
+                <span style={{ color: "var(--az-mut)" }}>Origem</span>
+                <span className="font-medium text-right">{sel.origem}</span>
+              </div>
+              <div className="flex justify-between gap-2 items-center">
+                <span style={{ color: "var(--az-mut)" }}>Empresa</span>
+                {sel.empresa ? <TagEmpresa empresa={sel.empresa} mini /> : <span className="font-medium">—</span>}
+              </div>
+              {[["Início", sel.inicio], ["Espera", `${sel.espera} min`],
                 ["Setor", sel.setor ?? "—"], ["Atendente", sel.atendente ?? "—"]].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-2">
                   <span style={{ color: "var(--az-mut)" }}>{k}</span>
