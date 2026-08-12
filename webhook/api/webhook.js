@@ -147,6 +147,24 @@ function detectarIntencao(texto) {
   return null;
 }
 
+/** Saudação / pedido de reinício do fluxo do bot */
+function ehReinicio(texto) {
+  const t = texto
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[!?.]+$/g, "")
+    .trim();
+  return [
+    "oi", "ola", "oie", "oii", "oiii", "oiee",
+    "hey", "hello", "hi", "eai", "eae", "fala",
+    "menu", "inicio", "reiniciar", "recomecar", "comecar",
+    "bom dia", "boa tarde", "boa noite",
+    "voltar", "voltar ao inicio", "comecar de novo", "nova conversa",
+  ].includes(t);
+}
+
 function secret() {
   return process.env.WEBHOOK_SECRET || process.env.VERIFY_TOKEN || "";
 }
@@ -288,6 +306,22 @@ export default async function handler(req, res) {
 
     const conversa = await acharOuCriarConversa(waId);
     await salvarMsg(conversa.id, "cliente", texto);
+
+    // Sempre que mandar "oi" (ou saudação), reinicia o fluxo do bot
+    if (ehReinicio(texto)) {
+      await responderCliente(conversa.id, waId, PERGUNTA_BOAS_VINDAS);
+      await atualizarConversa(conversa.id, {
+        etapa: 1,
+        status: "bot",
+        empresa: null,
+        assunto: null,
+        setor: null,
+        nome_cliente: null,
+        atendente_id: null,
+      });
+      await salvarMsg(conversa.id, "sistema", "Fluxo do bot reiniciado pelo cliente");
+      return res.status(200).json({ ok: true, reinicio: true });
+    }
 
     if (conversa.status === "andamento" || conversa.status === "encerrado") {
       return res.status(200).json({ ok: true });
