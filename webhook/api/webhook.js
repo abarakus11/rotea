@@ -375,16 +375,17 @@ async function notificarEspecialista(conversa, info, intencao) {
     intencao === "contratar" ? "Quer CONTRATAR serviços" :
     intencao === "atendente" ? "Quer falar com um atendente" :
     "Contato geral";
+  const params = [info.nome, nome, telCliente, rotulo];
 
-  // 1) Template (funciona mesmo sem janela de 24h), se estiver aprovado
-  let envio = await enviarWhatsAppTemplate(
-    info.especialistaWa,
-    "rotea_novo_lead",
-    "pt_BR",
-    [info.nome, nome, telCliente, rotulo],
-  );
+  // 1) Templates UTILITY (funcionam sem janela de 24h, quando APPROVED)
+  let envio = await enviarWhatsAppTemplate(info.especialistaWa, "rotea_lead_alerta", "pt_BR", params);
+  let via = "template:rotea_lead_alerta";
+  if (!envio.ok) {
+    envio = await enviarWhatsAppTemplate(info.especialistaWa, "rotea_novo_lead", "pt_BR", params);
+    via = "template:rotea_novo_lead";
+  }
 
-  // 2) Fallback: texto livre
+  // 2) Fallback: texto livre (só entrega bem se o especialista já falou com o número oficial nas últimas 24h)
   if (!envio.ok) {
     const paraQuem = info.especialistaNome ? `Olá, *${info.especialistaNome}*!` : "Olá!";
     const aviso =
@@ -397,6 +398,7 @@ async function notificarEspecialista(conversa, info, intencao) {
       `*Empresa:* ${info.nome}\n\n` +
       `Por favor, fale com o cliente pelo WhatsApp.`;
     envio = await enviarWhatsApp(info.especialistaWa, aviso);
+    via = "texto_livre";
   }
 
   if (envio.ok) {
@@ -404,7 +406,11 @@ async function notificarEspecialista(conversa, info, intencao) {
       conversa.id,
       "sistema",
       `Especialista ${info.especialistaNome || ""} +${envio.waId || info.especialistaWa} notificado · ${rotulo}` +
-        (envio.wamid ? ` · ${envio.wamid}` : ""),
+        ` · via ${via}` +
+        (envio.wamid ? ` · ${envio.wamid}` : "") +
+        (via === "texto_livre"
+          ? " · ⚠ template ainda pendente na Meta — se o especialista não abriu conversa com o número oficial, a entrega pode falhar"
+          : ""),
     );
   } else {
     await salvarMsg(
@@ -414,6 +420,30 @@ async function notificarEspecialista(conversa, info, intencao) {
     );
   }
   return envio;
+}
+
+async function processarStatuses(statuses) {
+  for (const st of statuses || []) {
+    const wamid = st.id || st.message_id || null;
+    const status = st.status || "";
+    const err = st.errors?.[0];
+    const erroTxt = err
+      ? `${err.code || ""} ${err.title || ""} ${err.message || err.error_data?.details || ""}`.trim()
+      : "";
+    console.log("meta status", { wamid, status, recipient: st.recipient_id, erro: erroTxt || null });
+    if (status === "failed" || status === "undelivered") {
+      try {
+        await rpc("wa_anotar_falha_wamid", {
+          p_secret: secret(),
+          p_wamid: wamid,
+          p_status: status,
+          p_erro: erroTxt || "falha de entrega",
+        });
+      } catch (e) {
+        console.error("wa_anotar_falha_wamid", e);
+      }
+    }
+  }
 }
 
 async function encaminharParaEspecialista(conversa, info, intencao) {
@@ -453,6 +483,10 @@ export default async function handler(req, res) {
 
   try {
     const entry = req.body?.entry?.[0]?.changes?.[0]?.value;
+    if (entry?.statuses?.length) {
+      await processarStatuses(entry.statuses);
+      return res.status(200).json({ ok: true, statuses: true });
+    }
     const msg = entry?.messages?.[0];
     if (!msg || msg.type !== "text") return res.status(200).json({ ok: true });
 
