@@ -1,0 +1,151 @@
+// ============================================================
+// ROTEA · Webhook da API oficial do WhatsApp (Meta Cloud API)
+// Número: +55 11 5304-9387
+// Fluxo: boas-vindas → nome → empresa → assunto → roteamento
+// Variáveis de ambiente (Vercel → Settings → Environment Variables):
+//   WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, SUPABASE_SERVICE_ROLE_KEY
+// ============================================================
+
+const SUPABASE_URL = "https://wuuijbetsckjusnvdxts.supabase.co";
+
+const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA"];
+
+const PERGUNTA_BOAS_VINDAS =
+  "Olá! 👋 Bem-vindo(a) ao atendimento do Grupo FIC. Sou o assistente virtual. Para começar, qual o seu nome?";
+const PERGUNTA_EMPRESA =
+  "Sobre qual empresa você gostaria de falar?\n\n1⃣ RWB\n2⃣ LIV ECO HABITATS\n3⃣ IPROTECTOR\n4⃣ LEGALCERT\n5⃣ SINATRA\n6⃣ ANIMA\n\nResponda com o nome ou o número da opção.";
+const PERGUNTA_ASSUNTO = (nome) =>
+  `Certo, ${nome}! Em poucas palavras, como podemos ajudar você hoje?`;
+const MSG_FILA = (setor) =>
+  `Perfeito! Encaminhei você para a nossa equipe de *${setor}*. Um atendente vai falar com você em instantes. ⏳`;
+
+const REGRAS = [
+  { destino: "Comercial", kws: ["comprar", "preço", "preco", "orçamento", "orcamento", "plano", "proposta", "contratar", "investir", "valor"] },
+  { destino: "Tecnologia/Suporte", kws: ["erro", "bug", "não funciona", "nao funciona", "travando", "senha", "acesso", "app", "sistema"] },
+  { destino: "Jurídico", kws: ["contrato", "cláusula", "clausula", "processo", "rescisão", "rescisao", "jurídico", "juridico", "advogado"] },
+];
+const SETOR_PADRAO = "Atendimento";
+
+async function sb(path, method, body, headersExtra) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers: {
+      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+      ...(headersExtra || {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const t = await r.text();
+  return t ? JSON.parse(t) : null;
+}
+
+async function acharOuCriarConversa(waId) {
+  const achadas = await sb(`conversas?wa_id=eq.${encodeURIComponent(waId)}&select=*`, "GET");
+  if (Array.isArray(achadas) && achadas.length > 0) return achadas[0];
+  const criadas = await sb("conversas", "POST", { wa_id: waId }, { Prefer: "return=representation" });
+  return criadas[0];
+}
+
+async function salvarMsg(conversaId, de, texto) {
+  await sb("mensagens", "POST", { conversa_id: conversaId, de, texto });
+}
+
+async function atualizarConversa(id, patch) {
+  await sb(`conversas?id=eq.${id}`, "PATCH", patch);
+}
+
+async function enviarWhatsApp(para, texto) {
+  await fetch(`https://graph.facebook.com/v21.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: para,
+      type: "text",
+      text: { body: texto },
+    }),
+  });
+}
+
+function detectarEmpresa(texto) {
+  const t = texto.trim().toLowerCase();
+  const porNumero = { "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5 };
+  if (porNumero[t] !== undefined) return EMPRESAS[porNumero[t]];
+  return EMPRESAS.find((e) => t.includes(e.toLowerCase())) ?? null;
+}
+
+function rotear(assunto) {
+  const t = assunto.toLowerCase();
+  for (const r of REGRAS) if (r.kws.some((k) => t.includes(k))) return r.destino;
+  return SETOR_PADRAO;
+}
+
+export default async function handler(req, res) {
+  if (req.method === "GET") {
+    const modo = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+    if (modo === "subscribe" && token === process.env.VERIFY_TOKEN) {
+      return res.status(200).send(challenge);
+    }
+    return res.status(403).send("Token de verificação inválido");
+  }
+
+  if (req.method !== "POST") return res.status(405).end();
+
+  try {
+    const entry = req.body?.entry?.[0]?.changes?.[0]?.value;
+    const msg = entry?.messages?.[0];
+    if (!msg || msg.type !== "text") return res.status(200).json({ ok: true });
+
+    const waId = msg.from;
+    const texto = msg.text?.body ?? "";
+
+    const conversa = await acharOuCriarConversa(waId);
+    await salvarMsg(conversa.id, "cliente", texto);
+
+    if (conversa.status === "andamento" || conversa.status === "encerrado") {
+      return res.status(200).json({ ok: true });
+    }
+
+    if (conversa.etapa === 0) {
+      await enviarWhatsApp(waId, PERGUNTA_BOAS_VINDAS);
+      await salvarMsg(conversa.id, "bot", PERGUNTA_BOAS_VINDAS);
+      await atualizarConversa(conversa.id, { etapa: 1, status: "bot" });
+    } else if (conversa.etapa === 1) {
+      const nome = texto.trim().slice(0, 80);
+      await enviarWhatsApp(waId, PERGUNTA_EMPRESA);
+      await salvarMsg(conversa.id, "bot", PERGUNTA_EMPRESA);
+      await atualizarConversa(conversa.id, { etapa: 2, nome_cliente: nome });
+    } else if (conversa.etapa === 2) {
+      const empresa = detectarEmpresa(texto);
+      if (!empresa) {
+        const aviso = "Não identifiquei a empresa. " + PERGUNTA_EMPRESA;
+        await enviarWhatsApp(waId, aviso);
+        await salvarMsg(conversa.id, "bot", aviso);
+      } else {
+        const p = PERGUNTA_ASSUNTO((conversa.nome_cliente || "").split(" ")[0] || "tudo bem");
+        await enviarWhatsApp(waId, p);
+        await salvarMsg(conversa.id, "bot", p);
+        await atualizarConversa(conversa.id, { etapa: 3, empresa });
+      }
+    } else if (conversa.etapa === 3) {
+      const setor = rotear(texto);
+      const confirma = MSG_FILA(setor);
+      await enviarWhatsApp(waId, confirma);
+      await salvarMsg(conversa.id, "bot", confirma);
+      await salvarMsg(conversa.id, "sistema", `Regra aplicada · empresa ${conversa.empresa} · encaminhado para fila ${setor}`);
+      await atualizarConversa(conversa.id, { etapa: 4, assunto: texto.slice(0, 300), setor, status: "fila" });
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error("webhook error", e);
+    return res.status(200).json({ ok: true });
+  }
+}

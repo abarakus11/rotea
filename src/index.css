@@ -1,0 +1,89 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ── AtendeZap design tokens ─────────────────────────────────── */
+
+:root {
+  --az-ink: #14201B;
+  --az-paper: #F5F4EE;
+  --az-card: #FFFFFF;
+  --az-forest: #0C3B2E;
+  --az-forest-2: #0F4A3A;
+  --az-leaf: #1FA860;
+  --az-leaf-soft: #E3F4EA;
+  --az-amber: #E19A2E;
+  --az-amber-soft: #FBEFDB;
+  --az-clay: #C94F3D;
+  --az-clay-soft: #F9E4E0;
+  --az-line: #E4E2D9;
+  --az-mut: #6B7570;
+}
+body { font-family: 'IBM Plex Sans', sans-serif; color: var(--az-ink); background: var(--az-paper); }
+.f-disp { font-family: 'Space Grotesk', sans-serif; }
+.f-mono { font-family: 'IBM Plex Mono', monospace; }
+.az-card { background: var(--az-card); border: 1px solid var(--az-line); border-radius: 10px; }
+.az-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.az-scroll::-webkit-scrollbar-thumb { background: #CFCDC2; border-radius: 3px; }
+@keyframes az-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.az-in { animation: az-in .28s ease both; }
+@keyframes az-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.az-pulse { animation: az-pulse 1.2s ease infinite; }
+@media (prefers-reduced-motion: reduce) { .az-in, .az-pulse { animation: none; } }
