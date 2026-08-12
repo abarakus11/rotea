@@ -81,13 +81,15 @@ const EMPRESAS_INFO = {
   SINATRA: {
     nome: "SINATRA",
     sobre:
-      "A *SINATRA* faz parte do Grupo FIC.\n\n_(Aguardando texto oficial da empresa.)_",
+      "O *Sinatra* é um clube exclusivo para apreciadores da boa música, da cultura refinada e dos momentos únicos.\n\nCada ambiente é uma composição — gastronomia autoral, encontros memoráveis e um serviço que antecipa o desejo antes do pedido.",
     servicos: [
-      "Serviço 1 — descrição breve",
-      "Serviço 2 — descrição breve",
-      "Serviço 3 — descrição breve",
+      "Experiências gastronômicas autorais",
+      "Ambientes exclusivos com boa música e cultura refinada",
+      "Encontros e eventos memoráveis",
+      "Serviço personalizado de alto padrão",
+      "Clube privativo para momentos únicos",
     ],
-    site: "https://www.grupo-fic.com.br",
+    site: "https://www.sinatraclub.com.br/",
     especialistaWa: "5511947930224",
     setor: "Comercial",
   },
