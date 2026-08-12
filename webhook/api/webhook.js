@@ -357,6 +357,14 @@ async function salvarMsg(conversaId, de, texto, extras = {}) {
   await rpc("wa_salvar_msg", body);
 }
 
+function normalizeAudioMime(mime) {
+  const m = String(mime || "").toLowerCase().split(";")[0].trim();
+  if (!m || m === "application/octet-stream") return "audio/ogg";
+  // WhatsApp voice notes: audio/ogg; codecs=opus (ou audio/opus)
+  if (m === "audio/opus") return "audio/ogg";
+  return m;
+}
+
 function extFromMime(mime) {
   const m = String(mime || "").toLowerCase();
   if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
@@ -365,10 +373,23 @@ function extFromMime(mime) {
   if (m.includes("amr")) return "amr";
   if (m.includes("webm")) return "webm";
   if (m.includes("wav")) return "wav";
+  if (m.includes("ogg") || m.includes("opus")) return "ogg";
   return "ogg";
 }
 
-/** Baixa mídia da Meta Cloud API (id → url → bytes). */
+/** Monta File/Blob com nome+ext corretos para multipart (Whisper / Meta). */
+function arquivoAudioParaForm(buffer, mimeType, basename = "audio") {
+  const mime = normalizeAudioMime(mimeType);
+  const ext = extFromMime(mime);
+  const filename = `${basename}.${ext}`;
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  if (typeof File !== "undefined") {
+    return { file: new File([bytes], filename, { type: mime }), filename, mime };
+  }
+  return { file: new Blob([bytes], { type: mime }), filename, mime };
+}
+
+/** Baixa mídia da Meta Cloud API (id → url → bytes). Auth Bearer nos dois passos. */
 async function baixarMediaWhatsApp(mediaId) {
   const token = process.env.WHATSAPP_TOKEN;
   if (!token || !mediaId) throw new Error("media: token ou id ausente");
@@ -379,11 +400,16 @@ async function baixarMediaWhatsApp(mediaId) {
   if (!meta.ok) throw new Error(`media meta ${meta.status}: ${metaTxt}`);
   const info = JSON.parse(metaTxt);
   const url = info.url;
-  const mime = (info.mime_type || "audio/ogg").split(";")[0].trim();
+  const mime = normalizeAudioMime(info.mime_type || "audio/ogg");
   if (!url) throw new Error("media: url ausente na Meta");
-  const bin = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  // CDN da Meta exige Authorization; redeclarar headers evita perder Bearer em redirect.
+  const bin = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    redirect: "follow",
+  });
   if (!bin.ok) throw new Error(`media download ${bin.status}`);
   const buffer = Buffer.from(await bin.arrayBuffer());
+  if (!buffer.length) throw new Error("media download: arquivo vazio");
   return { buffer, mime, sha256: info.sha256 || null };
 }
 
@@ -404,20 +430,28 @@ async function uploadWhatsappMedia(path, buffer, contentType) {
   return `${SUPABASE_URL}/storage/v1/object/public/whatsapp-media/${path}`;
 }
 
-/** Whisper (opcional). Retorna texto ou null se sem chave / falha. */
+/**
+ * Whisper (opcional).
+ * Retorna { text, error } — text preenchido em sucesso; error classifica falha
+ * (missing_key | empty | quota | auth | format | http | network).
+ */
 async function transcreverAudio(buffer, mimeType) {
   const key = process.env.OPENAI_API_KEY;
-  if (!key) return null;
+  if (!key) return { text: null, error: "missing_key" };
+  if (!buffer?.length) return { text: null, error: "empty" };
   try {
-    const ext = extFromMime(mimeType);
+    const { file, filename, mime } = arquivoAudioParaForm(buffer, mimeType, "voice");
     const form = new FormData();
-    form.append(
-      "file",
-      new Blob([new Uint8Array(buffer)], { type: mimeType || "audio/ogg" }),
-      `audio.${ext}`,
-    );
+    // File já carrega o filename; Blob precisa do 3º arg (Node serverless / undici).
+    if (typeof File !== "undefined" && file instanceof File) {
+      form.append("file", file);
+    } else {
+      form.append("file", file, filename);
+    }
     form.append("model", "whisper-1");
     form.append("language", "pt");
+    form.append("response_format", "json");
+    console.log("whisper request", { bytes: buffer.length, mime, filename });
     const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}` },
@@ -425,15 +459,33 @@ async function transcreverAudio(buffer, mimeType) {
     });
     const body = await r.text();
     if (!r.ok) {
-      console.error("whisper fail", r.status, body);
-      return null;
+      let code = null;
+      let type = null;
+      try {
+        const err = body ? JSON.parse(body) : null;
+        code = err?.error?.code || null;
+        type = err?.error?.type || null;
+      } catch { /* ignore */ }
+      console.error("whisper fail", r.status, { code, type, body: body?.slice?.(0, 400) || body });
+      if (r.status === 401 || r.status === 403) return { text: null, error: "auth" };
+      if (
+        r.status === 429 ||
+        code === "insufficient_quota" ||
+        code === "credit_balance_exhausted" ||
+        type === "insufficient_quota"
+      ) {
+        return { text: null, error: "quota" };
+      }
+      if (r.status === 400) return { text: null, error: "format" };
+      return { text: null, error: "http" };
     }
     const parsed = body ? JSON.parse(body) : null;
     const texto = (parsed?.text || "").trim();
-    return texto || null;
+    if (!texto) return { text: null, error: "empty" };
+    return { text: texto, error: null };
   } catch (e) {
     console.error("whisper error", e);
-    return null;
+    return { text: null, error: "network" };
   }
 }
 
@@ -514,11 +566,16 @@ async function uploadMediaMeta(buffer, mimeType, filename) {
   const form = new FormData();
   form.append("messaging_product", "whatsapp");
   form.append("type", mimeType || "audio/mpeg");
-  form.append(
-    "file",
-    new Blob([new Uint8Array(buffer)], { type: mimeType || "audio/mpeg" }),
-    filename || "reply.mp3",
+  const { file, filename: nome } = arquivoAudioParaForm(
+    buffer,
+    mimeType || "audio/mpeg",
+    (filename || "reply").replace(/\.[^.]+$/, "") || "reply",
   );
+  if (typeof File !== "undefined" && file instanceof File) {
+    form.append("file", file);
+  } else {
+    form.append("file", file, filename || nome);
+  }
   const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/media`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
@@ -851,17 +908,21 @@ export default async function handler(req, res) {
 
     if (audioInfo) {
       let mediaUrl = null;
-      let mime = audioInfo.mime;
+      let mime = normalizeAudioMime(audioInfo.mime);
       let transcript = null;
+      let whisperError = null;
       try {
         const { buffer, mime: mimeDl } = await baixarMediaWhatsApp(audioInfo.mediaId);
-        mime = mimeDl || mime;
+        mime = normalizeAudioMime(mimeDl || mime);
         const path = `${conversa.id}/${Date.now()}_${audioInfo.mediaId}.${extFromMime(mime)}`;
         const uploadMime = mime.startsWith("audio/") ? mime : "application/octet-stream";
         mediaUrl = await uploadWhatsappMedia(path, buffer, uploadMime);
-        transcript = await transcreverAudio(buffer, mime);
+        const whisper = await transcreverAudio(buffer, mime);
+        transcript = whisper.text;
+        whisperError = whisper.error;
       } catch (e) {
         console.error("audio pipeline", e);
+        whisperError = whisperError || "pipeline";
       }
 
       if (transcript) {
@@ -883,19 +944,25 @@ export default async function handler(req, res) {
         // Sem transcrição: no fluxo do bot, pede texto para continuar
         if (conversa.status === "bot") {
           const temWhisper = Boolean(process.env.OPENAI_API_KEY);
-          await responderCliente(
-            conversa.id,
-            waId,
-            temWhisper
-              ? "Recebi seu áudio, mas não consegui entender. Pode digitar a mensagem?"
-              : "Recebi seu áudio 🎧. Por enquanto, responda por *texto* para eu continuar o atendimento.",
-          );
+          let msgAudio =
+            "Recebi seu áudio 🎧. Por enquanto, responda por *texto* para eu continuar o atendimento.";
+          if (temWhisper) {
+            if (whisperError === "quota" || whisperError === "auth" || whisperError === "http" || whisperError === "network") {
+              msgAudio =
+                "Recebi seu áudio, mas estou com uma instabilidade para ouvir agora. Pode digitar a mensagem ou tentar de novo em instantes?";
+            } else {
+              msgAudio =
+                "Recebi seu áudio, mas não consegui entender. Pode digitar a mensagem?";
+            }
+          }
+          await responderCliente(conversa.id, waId, msgAudio);
         }
         return res.status(200).json({
           ok: true,
           audio: true,
           media: Boolean(mediaUrl),
           transcript: false,
+          whisperError: whisperError || "unknown",
         });
       }
     } else {
