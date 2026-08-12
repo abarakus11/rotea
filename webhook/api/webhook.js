@@ -37,6 +37,12 @@ const ESPECIALISTAS = {
     msgCliente:
       "Perfeito! Um especialista da *LEGALCERT* vai entrar em contato com você em breve. ⏳",
   },
+  SINATRA: {
+    wa: "5511947930224",
+    setor: "Comercial",
+    msgCliente:
+      "Perfeito! Um especialista da *SINATRA* vai entrar em contato com você em breve. ⏳",
+  },
   ANIMA: {
     wa: "5511943870655",
     setor: "Comercial",
