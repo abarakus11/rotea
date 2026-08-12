@@ -453,8 +453,8 @@ async function encaminharParaEspecialista(conversa, info, intencao) {
   const msgCliente = envio.ok
     ? (
       intencao === "contratar"
-        ? `Ótimo! Um especialista da *${info.nome}* já foi avisado e vai falar com você sobre a contratação. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
-        : `Perfeito! Um atendente da *${info.nome}* já foi avisado e vai falar com você em breve. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
+        ? `Ótimo! Um especialista da *${info.nome}* já foi avisado e vai falar com você sobre a contratação. ⏳\n\nJá conhece o canal do podcast no YouTube? Se ainda não, vale a visita: https://www.youtube.com/@ficcionariospodcast\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
+        : `Perfeito! Um atendente da *${info.nome}* já foi avisado e vai falar com você em breve. ⏳\n\nJá conhece o canal do podcast no YouTube? Se ainda não, vale a visita: https://www.youtube.com/@ficcionariospodcast\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
     )
     : `Registrei seu pedido da *${info.nome}*. Nossa equipe vai retornar em breve.\n\n_Digite: retornar ao menu_`;
 
