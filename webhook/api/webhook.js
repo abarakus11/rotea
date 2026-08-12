@@ -47,6 +47,7 @@ const EMPRESAS_INFO = {
     ],
     site: "https://www.grupo-fic.com.br",
     especialistaWa: "5514997790770",
+    especialistaNome: "Hugo Legramandi",
     setor: "Comercial",
   },
   IPROTECTOR: {
@@ -62,6 +63,7 @@ const EMPRESAS_INFO = {
     ],
     site: "https://www.iprotector.com.br/",
     especialistaWa: "5511943870655",
+    especialistaNome: "Carlos Eber",
     setor: "Comercial",
   },
   LEGALCERT: {
@@ -77,6 +79,7 @@ const EMPRESAS_INFO = {
     ],
     site: "https://www.legalcert.com.br/",
     especialistaWa: "551151946830",
+    especialistaNome: "Giovanna Cabral",
     setor: "Comercial",
   },
   SINATRA: {
@@ -92,6 +95,7 @@ const EMPRESAS_INFO = {
     ],
     site: "https://www.sinatraclub.com.br/",
     especialistaWa: "5511947930224",
+    especialistaNome: "Danielle",
     setor: "Comercial",
   },
   ANIMA: {
@@ -107,6 +111,7 @@ const EMPRESAS_INFO = {
     ],
     site: "https://www.animawc.com.br/",
     especialistaWa: "5511943870655",
+    especialistaNome: "Carlos Eber",
     setor: "Comercial",
   },
 };
@@ -364,7 +369,9 @@ async function notificarEspecialista(conversa, info, intencao) {
 
   // 2) Fallback: texto livre
   if (!envio.ok) {
+    const paraQuem = info.especialistaNome ? `Olá, *${info.especialistaNome}*!` : "Olá!";
     const aviso =
+      `${paraQuem}\n\n` +
       `🔔 *Novo atendimento — ${info.nome}*\n\n` +
       `*Nome:* ${nome}\n` +
       `*WhatsApp do cliente:* ${telCliente}\n` +
@@ -379,7 +386,7 @@ async function notificarEspecialista(conversa, info, intencao) {
     await salvarMsg(
       conversa.id,
       "sistema",
-      `Especialista +${envio.waId || info.especialistaWa} notificado · ${rotulo}` +
+      `Especialista ${info.especialistaNome || ""} +${envio.waId || info.especialistaWa} notificado · ${rotulo}` +
         (envio.wamid ? ` · ${envio.wamid}` : ""),
     );
   } else {
