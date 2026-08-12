@@ -33,6 +33,7 @@ const EMPRESAS_INFO = {
     ],
     site: "https://www.rwbagriinvest.com.br/",
     especialistaWa: "556799797227",
+    especialistaNome: "Roberto Hayashi",
     setor: "Comercial",
   },
   "LIV ECO HABITATS": {
@@ -308,7 +309,6 @@ async function notificarEspecialista(conversa, info, intencao) {
     intencao === "atendente" ? "Quer falar com atendente" :
     "Contato geral";
 
-  // Ping curto primeiro (melhor taxa de entrega)
   const ping =
     `🔔 *ROTEA · ${info.nome}*\n` +
     `${rotulo}\n` +
@@ -348,18 +348,50 @@ async function notificarEspecialista(conversa, info, intencao) {
   return envioPing;
 }
 
-async function encaminharParaEspecialista(conversa, info, intencao) {
-  const envio = await notificarEspecialista(conversa, info, intencao);
+function formatarTelefoneBr(digits) {
+  const d = String(digits || "").replace(/\D/g, "");
+  if (!d.startsWith("55") || d.length < 12) return d ? `+${d}` : "";
+  const ddd = d.slice(2, 4);
+  const rest = d.slice(4);
+  if (rest.length === 9) return `+55 ${ddd} ${rest.slice(0, 5)}-${rest.slice(5)}`;
+  if (rest.length === 8) return `+55 ${ddd} ${rest.slice(0, 4)}-${rest.slice(4)}`;
+  return `+${d}`;
+}
 
-  const msgCliente = envio.ok
-    ? (
-      intencao === "contratar"
-        ? `Ótimo! Já avisei o especialista da *${info.nome}* no WhatsApp. Em breve alguém fala com você sobre a contratação. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
-        : `Perfeito! Já avisei o atendente da *${info.nome}* no WhatsApp. Em breve alguém fala com você. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
-    )
-    : `Não consegui avisar o especialista agora, mas registrei seu pedido da *${info.nome}*. Em breve retornamos.\n\n_Digite: retornar ao menu_`;
+function linkWhatsAppEspecialista(info, nomeCliente, intencao) {
+  const acao = intencao === "contratar" ? "contratar serviços" : "falar com um atendente";
+  const texto = encodeURIComponent(
+    `Olá! Vim pelo atendimento do Grupo FIC (${info.nome}). Meu nome é ${nomeCliente || "cliente"}. Gostaria de ${acao}.`,
+  );
+  return `https://wa.me/${info.especialistaWa}?text=${texto}`;
+}
+
+async function encaminharParaEspecialista(conversa, info, intencao) {
+  const nome = conversa.nome_cliente || "Cliente";
+  const telEsp = formatarTelefoneBr(info.especialistaWa);
+  const nomeEsp = info.especialistaNome || "especialista";
+  const linkEsp = linkWhatsAppEspecialista(info, nome, intencao);
+
+  // 1) Cliente recebe o WhatsApp direto do atendente (garantia de chegar no celular dele)
+  const msgCliente =
+    `Perfeito! Vou te conectar com o especialista da *${info.nome}*.\n\n` +
+    `👤 ${nomeEsp}\n` +
+    `📱 WhatsApp: ${telEsp}\n\n` +
+    `👉 Toque para falar agora:\n${linkEsp}\n\n` +
+    `_Se quiser voltar ao menu, digite: retornar ao menu_`;
 
   await responderCliente(conversa.id, conversa.wa_id, msgCliente);
+
+  // 2) Tenta avisar o especialista pelo número oficial (pode falhar fora da janela de 24h)
+  const envio = await notificarEspecialista(conversa, info, intencao);
+  if (!envio.ok) {
+    await salvarMsg(
+      conversa.id,
+      "sistema",
+      `Aviso API ao especialista falhou; cliente recebeu o contato direto ${telEsp}`,
+    );
+  }
+
   await atualizarConversa(conversa.id, {
     etapa: 4,
     empresa: info.nome,
