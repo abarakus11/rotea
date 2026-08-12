@@ -13,11 +13,35 @@ const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA
 
 // Quando o lead escolhe a empresa, notifica este WhatsApp e encerra a triagem antecipada
 const ESPECIALISTAS = {
+  RWB: {
+    wa: "556799797227",
+    setor: "Comercial",
+    msgCliente:
+      "Perfeito! Um especialista da *RWB* vai entrar em contato com você em breve. ⏳",
+  },
+  "LIV ECO HABITATS": {
+    wa: "5514997790770",
+    setor: "Comercial",
+    msgCliente:
+      "Perfeito! Um especialista da *LIV ECO HABITATS* vai entrar em contato com você em breve. ⏳",
+  },
   IPROTECTOR: {
     wa: "5511943870655",
     setor: "Comercial",
     msgCliente:
       "Perfeito! Um especialista da *IPROTECTOR* vai entrar em contato com você em breve. ⏳",
+  },
+  LEGALCERT: {
+    wa: "551151946830",
+    setor: "Comercial",
+    msgCliente:
+      "Perfeito! Um especialista da *LEGALCERT* vai entrar em contato com você em breve. ⏳",
+  },
+  ANIMA: {
+    wa: "5511943870655",
+    setor: "Comercial",
+    msgCliente:
+      "Perfeito! Um especialista da *ANIMA* vai entrar em contato com você em breve. ⏳",
   },
 };
 
@@ -61,7 +85,7 @@ async function encaminharEspecialista(conversa, empresa, especial) {
 
   const envioEsp = await enviarWhatsApp(especial.wa, avisoEsp);
   if (envioEsp.ok) {
-    await salvarMsg(conversa.id, "sistema", `Lead IProtector notificado para +${especial.wa}`);
+    await salvarMsg(conversa.id, "sistema", `Lead ${empresa} notificado para +${especial.wa}`);
   } else {
     await salvarMsg(conversa.id, "sistema", `Falha ao notificar especialista +${especial.wa}. Lead ficou na fila da Rotea.`);
   }
@@ -196,7 +220,7 @@ export default async function handler(req, res) {
       if (!empresa) {
         await responderCliente(conversa.id, waId, "Não identifiquei a empresa. " + PERGUNTA_EMPRESA);
       } else if (ESPECIALISTAS[empresa]) {
-        // IProtector (e outras com especialista): avisa o lead e notifica o número responsável
+        // Empresa com especialista dedicado: avisa o lead e notifica o número responsável
         await atualizarConversa(conversa.id, { empresa, nome_cliente: conversa.nome_cliente });
         const atualizada = { ...conversa, empresa };
         await encaminharEspecialista(atualizada, empresa, ESPECIALISTAS[empresa]);
