@@ -256,7 +256,7 @@ async function notificarEspecialista(conversa, info, intencao) {
     `WhatsApp: ${telCliente}\n` +
     `Empresa: ${info.nome}\n` +
     `Intenção: ${rotulo}\n\n` +
-    `Abra a Rotea para atender:\nhttps://roteabot.vercel.app`;
+    `Entre em contato com o cliente pelo WhatsApp.`;
 
   const envio = await enviarWhatsApp(info.especialistaWa, aviso);
   if (envio.ok) {
