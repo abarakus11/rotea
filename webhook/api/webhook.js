@@ -299,6 +299,51 @@ async function buscarUltimasMsgs(conversaId, limite = 10) {
   }
 }
 
+async function enviarWhatsAppTemplate(para, templateName, languageCode, bodyParams) {
+  const phoneId = process.env.PHONE_NUMBER_ID;
+  const token = process.env.WHATSAPP_TOKEN;
+  if (!phoneId || !token) return { ok: false, erro: "credenciais ausentes" };
+  const destino = String(para || "").replace(/\D/g, "");
+  if (!destino) return { ok: false, erro: "destino inválido" };
+
+  const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: destino,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components: [
+          {
+            type: "body",
+            parameters: bodyParams.map((text) => ({ type: "text", text: String(text) })),
+          },
+        ],
+      },
+    }),
+  });
+  const body = await r.text();
+  let parsed = null;
+  try { parsed = body ? JSON.parse(body) : null; } catch { /* ignore */ }
+  if (!r.ok) {
+    console.error("meta template fail", r.status, body);
+    return { ok: false, erro: body, destino };
+  }
+  return {
+    ok: true,
+    destino,
+    waId: parsed?.contacts?.[0]?.wa_id || destino,
+    wamid: parsed?.messages?.[0]?.id || null,
+  };
+}
+
 async function notificarEspecialista(conversa, info, intencao) {
   const nome = conversa.nome_cliente || "Cliente";
   const waDigits = String(conversa.wa_id || "").replace(/\D/g, "");
@@ -306,92 +351,60 @@ async function notificarEspecialista(conversa, info, intencao) {
   const linkWa = waDigits ? `https://wa.me/${waDigits}` : "";
   const rotulo =
     intencao === "contratar" ? "Quer CONTRATAR serviços" :
-    intencao === "atendente" ? "Quer falar com atendente" :
+    intencao === "atendente" ? "Quer falar com um atendente" :
     "Contato geral";
 
-  const ping =
-    `🔔 *ROTEA · ${info.nome}*\n` +
-    `${rotulo}\n` +
-    `Cliente: *${nome}*\n` +
-    `WhatsApp: ${telCliente}` +
-    (linkWa ? `\nAbrir: ${linkWa}` : "");
-
-  const envioPing = await enviarWhatsApp(info.especialistaWa, ping);
-  if (!envioPing.ok) {
-    await salvarMsg(conversa.id, "sistema", `Falha ao notificar especialista +${info.especialistaWa}: ${String(envioPing.erro || "erro").slice(0, 180)}`);
-    return envioPing;
-  }
-
-  const msgs = await buscarUltimasMsgs(conversa.id, 8);
-  const historico = msgs
-    .filter((m) => m.de === "cliente" || m.de === "bot")
-    .map((m) => {
-      const quem = m.de === "cliente" ? "Cliente" : "Bot";
-      const txt = String(m.texto || "").replace(/\s+/g, " ").slice(0, 100);
-      return `• ${quem}: ${txt}`;
-    })
-    .join("\n");
-
-  if (historico) {
-    await enviarWhatsApp(
-      info.especialistaWa,
-      `📋 *Detalhes do lead ${info.nome}*\nNome: ${nome}\nWhatsApp: ${telCliente}\nIntenção: ${rotulo}\n\n*Resumo:*\n${historico}\n\nAtenda pelo WhatsApp.`,
-    );
-  }
-
-  await salvarMsg(
-    conversa.id,
-    "sistema",
-    `Lead ${info.nome} (${rotulo}) notificado para +${envioPing.waId || info.especialistaWa}` +
-      (envioPing.wamid ? ` · id ${envioPing.wamid}` : ""),
+  // 1) Template (funciona mesmo sem janela de 24h), se estiver aprovado
+  let envio = await enviarWhatsAppTemplate(
+    info.especialistaWa,
+    "rotea_novo_lead",
+    "pt_BR",
+    [info.nome, nome, telCliente, rotulo],
   );
-  return envioPing;
-}
 
-function formatarTelefoneBr(digits) {
-  const d = String(digits || "").replace(/\D/g, "");
-  if (!d.startsWith("55") || d.length < 12) return d ? `+${d}` : "";
-  const ddd = d.slice(2, 4);
-  const rest = d.slice(4);
-  if (rest.length === 9) return `+55 ${ddd} ${rest.slice(0, 5)}-${rest.slice(5)}`;
-  if (rest.length === 8) return `+55 ${ddd} ${rest.slice(0, 4)}-${rest.slice(4)}`;
-  return `+${d}`;
-}
-
-function linkWhatsAppEspecialista(info, nomeCliente, intencao) {
-  const acao = intencao === "contratar" ? "contratar serviços" : "falar com um atendente";
-  const texto = encodeURIComponent(
-    `Olá! Vim pelo atendimento do Grupo FIC (${info.nome}). Meu nome é ${nomeCliente || "cliente"}. Gostaria de ${acao}.`,
-  );
-  return `https://wa.me/${info.especialistaWa}?text=${texto}`;
-}
-
-async function encaminharParaEspecialista(conversa, info, intencao) {
-  const nome = conversa.nome_cliente || "Cliente";
-  const telEsp = formatarTelefoneBr(info.especialistaWa);
-  const nomeEsp = info.especialistaNome || "especialista";
-  const linkEsp = linkWhatsAppEspecialista(info, nome, intencao);
-
-  // 1) Cliente recebe o WhatsApp direto do atendente (garantia de chegar no celular dele)
-  const msgCliente =
-    `Perfeito! Vou te conectar com o especialista da *${info.nome}*.\n\n` +
-    `👤 ${nomeEsp}\n` +
-    `📱 WhatsApp: ${telEsp}\n\n` +
-    `👉 Toque para falar agora:\n${linkEsp}\n\n` +
-    `_Se quiser voltar ao menu, digite: retornar ao menu_`;
-
-  await responderCliente(conversa.id, conversa.wa_id, msgCliente);
-
-  // 2) Tenta avisar o especialista pelo número oficial (pode falhar fora da janela de 24h)
-  const envio = await notificarEspecialista(conversa, info, intencao);
+  // 2) Fallback: texto livre
   if (!envio.ok) {
+    const aviso =
+      `🔔 *Novo atendimento — ${info.nome}*\n\n` +
+      `*Nome:* ${nome}\n` +
+      `*WhatsApp do cliente:* ${telCliente}\n` +
+      (linkWa ? `*Abrir conversa:* ${linkWa}\n` : "") +
+      `*Motivo:* ${rotulo}\n` +
+      `*Empresa:* ${info.nome}\n\n` +
+      `Por favor, fale com o cliente pelo WhatsApp.`;
+    envio = await enviarWhatsApp(info.especialistaWa, aviso);
+  }
+
+  if (envio.ok) {
     await salvarMsg(
       conversa.id,
       "sistema",
-      `Aviso API ao especialista falhou; cliente recebeu o contato direto ${telEsp}`,
+      `Especialista +${envio.waId || info.especialistaWa} notificado · ${rotulo}` +
+        (envio.wamid ? ` · ${envio.wamid}` : ""),
+    );
+  } else {
+    await salvarMsg(
+      conversa.id,
+      "sistema",
+      `Falha ao avisar especialista +${info.especialistaWa}: ${String(envio.erro || "erro").slice(0, 200)}`,
     );
   }
+  return envio;
+}
 
+async function encaminharParaEspecialista(conversa, info, intencao) {
+  // Avisa SOMENTE o especialista — o cliente NÃO recebe o contato dele
+  const envio = await notificarEspecialista(conversa, info, intencao);
+
+  const msgCliente = envio.ok
+    ? (
+      intencao === "contratar"
+        ? `Ótimo! Um especialista da *${info.nome}* já foi avisado e vai falar com você sobre a contratação. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
+        : `Perfeito! Um atendente da *${info.nome}* já foi avisado e vai falar com você em breve. ⏳\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
+    )
+    : `Registrei seu pedido da *${info.nome}*. Nossa equipe vai retornar em breve.\n\n_Digite: retornar ao menu_`;
+
+  await responderCliente(conversa.id, conversa.wa_id, msgCliente);
   await atualizarConversa(conversa.id, {
     etapa: 4,
     empresa: info.nome,
