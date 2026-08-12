@@ -25,11 +25,13 @@ Frontend: Vercel (framework Vite). Motor: projeto `rotea-webhook` com Root Direc
 Variaveis no projeto `rotea-webhook`:
 
 - `WHATSAPP_TOKEN` — token permanente da Meta (System User)
-- `PHONE_NUMBER_ID` — ID do numero na Cloud API (nao e o telefone; fica em Meta → App → WhatsApp → API Setup)
+- `PHONE_NUMBER_ID` — ID do numero na Cloud API (`1279305148594714` para +55 11 5304-9387)
 - `VERIFY_TOKEN` — palavra secreta do webhook (ex.: `rotea_wa_verify_2026_fic`)
 - `WEBHOOK_SECRET` — mesmo valor do VERIFY_TOKEN (protege as RPCs no Supabase)
 
-Webhook na Meta:
+WhatsApp Business Account ID: `1206658925872309`
+
+Webhook na Meta (WhatsApp → Configuração → Assinar webhooks):
 
 - Callback URL: `https://rotea-webhook.vercel.app/api/webhook`
 - Verify token: o mesmo de `VERIFY_TOKEN`
