@@ -26,7 +26,7 @@ export interface NoFluxo {
 
 export const SETORES: Setor[] = ["Comercial", "Tecnologia/Suporte", "Atendimento", "Jurídico"];
 
-export const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA"] as const;
+export const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA", "SCAN ATIVOS"] as const;
 export type Empresa = (typeof EMPRESAS)[number];
 
 export const CORES_SETOR: Record<Setor, string> = {
@@ -43,6 +43,7 @@ export const CORES_EMPRESA: Record<Empresa, string> = {
   "LEGALCERT": "#C45C26",
   "SINATRA": "#7A3E9D",
   "ANIMA": "#C6284A",
+  "SCAN ATIVOS": "#0F4C81",
 };
 
 export const ETIQUETAS_DISPONIVEIS = [
@@ -59,7 +60,7 @@ export const USUARIOS: Usuario[] = [
 
 export const FLUXO_INICIAL: NoFluxo[] = [
   { id: "n1", tipo: "pergunta", titulo: "Boas-vindas", conteudo: "Olá! 👋 Bem-vindo(a). Sou o assistente virtual. Para começar, qual o seu nome?" },
-  { id: "n2", tipo: "pergunta", titulo: "Empresa de interesse", conteudo: "Sobre qual empresa você gostaria de falar?\n\n• RWB\n• LIV ECO HABITATS\n• IPROTECTOR\n• LEGALCERT\n• SINATRA\n• ANIMA" },
+  { id: "n2", tipo: "pergunta", titulo: "Empresa de interesse", conteudo: "Sobre qual empresa você gostaria de falar?\n\n• RWB\n• LIV ECO HABITATS\n• IPROTECTOR\n• LEGALCERT\n• SINATRA\n• ANIMA\n• SCAN ATIVOS" },
   { id: "n3", tipo: "pergunta", titulo: "Identificação do assunto", conteudo: "Certo, {nome}! Em poucas palavras, como podemos ajudar você hoje?" },
   { id: "n4", tipo: "pergunta", titulo: "Qualificação", conteudo: "Entendi. Você já é cliente ou este é o seu primeiro contato conosco?" },
   { id: "r1", tipo: "regra", titulo: "Rota Comercial", conteudo: "Intenção de compra, orçamento ou proposta", destino: "Comercial", palavrasChave: ["comprar", "preço", "orçamento", "plano", "proposta", "contratar"] },

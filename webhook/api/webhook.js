@@ -12,7 +12,7 @@
 const SUPABASE_URL = "https://wuuijbetsckjusnvdxts.supabase.co";
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1dWlqYmV0c2NranVzbnZkeHRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5NjAwODAsImV4cCI6MjEwMTUzNjA4MH0.VzHyjS2goE1tX0udysdjnuXcfym39jPkJWc3j-xFYbA";
 
-const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA"];
+const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA", "SCAN ATIVOS"];
 
 /**
  * Conteúdo por empresa — edite "sobre", "servicos" e "site".
@@ -114,12 +114,28 @@ const EMPRESAS_INFO = {
     especialistaNome: "Carlos Eber",
     setor: "Comercial",
   },
+  "SCAN ATIVOS": {
+    nome: "SCAN ATIVOS",
+    sobre:
+      "A *SCAN ATIVOS* permite negociar *ativos judiciais com liquidez e segurança*.\n\nPrecatórios, empresas, imóveis e garantias com *pagamento em escrow* e transferência formalizada sob acompanhamento jurídico da *LEGALCERT*.",
+    servicos: [
+      "Negociação de precatórios",
+      "Negociação de empresas",
+      "Negociação de imóveis",
+      "Garantias com pagamento em escrow",
+      "Transferência formalizada com acompanhamento jurídico da LEGALCERT",
+    ],
+    site: "https://www.scanativos.com.br/",
+    especialistaWa: "551151070250",
+    especialistaNome: "Caroline Lima",
+    setor: "Comercial",
+  },
 };
 
 const PERGUNTA_BOAS_VINDAS =
   "Olá! 👋 Bem-vindo(a) ao atendimento do Grupo FIC. Sou o assistente virtual. Para começar, qual o seu nome?";
 const PERGUNTA_EMPRESA =
-  "Sobre qual empresa você gostaria de falar?\n\n1⃣ RWB\n2⃣ LIV ECO HABITATS\n3⃣ IPROTECTOR\n4⃣ LEGALCERT\n5⃣ SINATRA\n6⃣ ANIMA\n\nResponda com o nome ou o número da opção.";
+  "Sobre qual empresa você gostaria de falar?\n\n1⃣ RWB\n2⃣ LIV ECO HABITATS\n3⃣ IPROTECTOR\n4⃣ LEGALCERT\n5⃣ SINATRA\n6⃣ ANIMA\n7⃣ SCAN ATIVOS\n\nResponda com o nome ou o número da opção.";
 
 function saudacaoAposNome(nome) {
   const primeiro = (nome || "").trim().split(/\s+/)[0] || "tudo bem";
@@ -148,8 +164,9 @@ function montarApresentacao(info) {
 
 function detectarEmpresa(texto) {
   const t = texto.trim().toLowerCase();
-  const porNumero = { "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5 };
+  const porNumero = { "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "7": 6 };
   if (porNumero[t] !== undefined) return EMPRESAS[porNumero[t]];
+  if (/\bscan\b/.test(t) || t.includes("scanativos") || t.includes("scan ativos")) return "SCAN ATIVOS";
   return EMPRESAS.find((e) => t.includes(e.toLowerCase())) ?? null;
 }
 
