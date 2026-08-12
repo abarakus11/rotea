@@ -31,16 +31,19 @@ export default async function handler(req, res) {
     });
     if (!u.ok) return res.status(401).json({ erro: "não autenticado" });
 
-    const srk = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!srk) return res.status(500).json({ erro: "SUPABASE_SERVICE_ROLE_KEY não configurada na Vercel" });
-    const sbh = { apikey: srk, Authorization: `Bearer ${srk}`, "Content-Type": "application/json" };
+    const sbh = {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${jwt}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    };
 
     const lead = LEADS[Math.floor(Math.random() * LEADS.length)];
     const waId = `sim_${Date.now().toString(36)}`;
     const telefoneFake = `+55 11 9${String(Math.floor(10000000 + Math.random() * 89999999))}`;
 
     const criadas = await (await fetch(`${SUPABASE_URL}/rest/v1/conversas`, {
-      method: "POST", headers: { ...sbh, Prefer: "return=representation" },
+      method: "POST", headers: sbh,
       body: JSON.stringify({
         wa_id: waId, nome_cliente: lead.nome, empresa: lead.empresa,
         assunto: lead.assunto, setor: lead.setor, status: "fila", etapa: 4,
@@ -48,7 +51,7 @@ export default async function handler(req, res) {
       }),
     })).json();
     const conversa = criadas?.[0];
-    if (!conversa) return res.status(500).json({ erro: "falha ao criar conversa" });
+    if (!conversa) return res.status(500).json({ erro: "falha ao criar conversa", detalhe: criadas });
 
     const msgs = [
       ["bot", PERGUNTA_BOAS_VINDAS],

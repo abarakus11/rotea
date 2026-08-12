@@ -2,11 +2,12 @@
 // ROTEA · Webhook da API oficial do WhatsApp (Meta Cloud API)
 // Número: +55 11 5304-9387
 // Fluxo: boas-vindas → nome → empresa → assunto → roteamento
-// Variáveis de ambiente (Vercel → Settings → Environment Variables):
-//   WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, SUPABASE_SERVICE_ROLE_KEY
+// Env (Vercel → rotea-webhook):
+//   WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, WEBHOOK_SECRET
 // ============================================================
 
 const SUPABASE_URL = "https://wuuijbetsckjusnvdxts.supabase.co";
+const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1dWlqYmV0c2NranVzbnZkeHRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5NjAwODAsImV4cCI6MjEwMTUzNjA4MH0.VzHyjS2goE1tX0udysdjnuXcfym39jPkJWc3j-xFYbA";
 
 const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA"];
 
@@ -26,41 +27,57 @@ const REGRAS = [
 ];
 const SETOR_PADRAO = "Atendimento";
 
-async function sb(path, method, body, headersExtra) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    method,
+function secret() {
+  return process.env.WEBHOOK_SECRET || process.env.VERIFY_TOKEN || "";
+}
+
+async function rpc(fn, body) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
     headers: {
-      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${ANON_KEY}`,
       "Content-Type": "application/json",
-      ...(headersExtra || {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: JSON.stringify(body),
   });
   const t = await r.text();
+  if (!r.ok) throw new Error(`${fn}: ${t || r.status}`);
   return t ? JSON.parse(t) : null;
 }
 
 async function acharOuCriarConversa(waId) {
-  const achadas = await sb(`conversas?wa_id=eq.${encodeURIComponent(waId)}&select=*`, "GET");
-  if (Array.isArray(achadas) && achadas.length > 0) return achadas[0];
-  const criadas = await sb("conversas", "POST", { wa_id: waId }, { Prefer: "return=representation" });
-  return criadas[0];
+  return rpc("wa_achar_ou_criar_conversa", { p_secret: secret(), p_wa_id: waId });
 }
 
 async function salvarMsg(conversaId, de, texto) {
-  await sb("mensagens", "POST", { conversa_id: conversaId, de, texto });
+  await rpc("wa_salvar_msg", {
+    p_secret: secret(),
+    p_conversa_id: conversaId,
+    p_de: de,
+    p_texto: texto,
+  });
 }
 
 async function atualizarConversa(id, patch) {
-  await sb(`conversas?id=eq.${id}`, "PATCH", patch);
+  await rpc("wa_atualizar_conversa", {
+    p_secret: secret(),
+    p_id: id,
+    p_patch: patch,
+  });
 }
 
 async function enviarWhatsApp(para, texto) {
-  await fetch(`https://graph.facebook.com/v21.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+  const phoneId = process.env.PHONE_NUMBER_ID;
+  const token = process.env.WHATSAPP_TOKEN;
+  if (!phoneId || !token) {
+    console.error("WHATSAPP_TOKEN ou PHONE_NUMBER_ID ausente");
+    return { ok: false, erro: "credenciais ausentes" };
+  }
+  const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -70,6 +87,12 @@ async function enviarWhatsApp(para, texto) {
       text: { body: texto },
     }),
   });
+  const body = await r.text();
+  if (!r.ok) {
+    console.error("meta send fail", r.status, body);
+    return { ok: false, erro: body };
+  }
+  return { ok: true };
 }
 
 function detectarEmpresa(texto) {

@@ -1,7 +1,7 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { Chat, Msg, Setor, StatusChat } from "./data";
 
-export const WEBHOOK_BASE = "https://rotea-webhook-carlos-projects27.vercel.app";
+export const WEBHOOK_BASE = "https://rotea-webhook.vercel.app";
 
 interface ConversaDB {
   id: string; wa_id: string; nome_cliente: string | null; empresa: string | null;

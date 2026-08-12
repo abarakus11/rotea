@@ -32,9 +32,12 @@ export default async function handler(req, res) {
     const { conversa_id, texto } = req.body || {};
     if (!conversa_id || !texto) return res.status(400).json({ erro: "dados incompletos" });
 
-    const srk = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!srk) return res.status(500).json({ erro: "SUPABASE_SERVICE_ROLE_KEY não configurada na Vercel" });
-    const sbh = { apikey: srk, Authorization: `Bearer ${srk}`, "Content-Type": "application/json" };
+    const sbh = {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${jwt}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    };
 
     const convs = await (await fetch(`${SUPABASE_URL}/rest/v1/conversas?id=eq.${conversa_id}&select=*`, { headers: sbh })).json();
     const conversa = convs?.[0];
@@ -48,7 +51,6 @@ export default async function handler(req, res) {
     let enviado = false, aviso = null;
     const ehSimulada = String(conversa.wa_id || "").startsWith("sim_");
     if (ehSimulada) {
-      // Cliente simulado responde de volta, seguindo um roteiro natural
       if (conversa.status !== "encerrado") {
         const doAtendente = await (await fetch(
           `${SUPABASE_URL}/rest/v1/mensagens?conversa_id=eq.${conversa_id}&de=eq.atendente&select=id`,
@@ -71,9 +73,13 @@ export default async function handler(req, res) {
         body: JSON.stringify({ messaging_product: "whatsapp", to: conversa.wa_id, type: "text", text: { body: texto } }),
       });
       enviado = r.ok;
-      if (!r.ok) aviso = "falha no envio via Meta — verifique token e número";
+      if (!r.ok) {
+        const detalhe = await r.text();
+        console.error("meta enviar fail", detalhe);
+        aviso = "falha no envio via Meta — verifique token e Phone Number ID";
+      }
     } else {
-      aviso = "API do WhatsApp ainda não ativada — mensagem registrada apenas na plataforma";
+      aviso = "API do WhatsApp ainda não ativada — falta PHONE_NUMBER_ID ou WHATSAPP_TOKEN na Vercel";
     }
 
     return res.status(200).json({ ok: true, enviado, aviso });
