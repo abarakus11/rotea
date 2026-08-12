@@ -115,6 +115,15 @@ const PERGUNTA_BOAS_VINDAS =
 const PERGUNTA_EMPRESA =
   "Sobre qual empresa você gostaria de falar?\n\n1⃣ RWB\n2⃣ LIV ECO HABITATS\n3⃣ IPROTECTOR\n4⃣ LEGALCERT\n5⃣ SINATRA\n6⃣ ANIMA\n\nResponda com o nome ou o número da opção.";
 
+function saudacaoAposNome(nome) {
+  const primeiro = (nome || "").trim().split(/\s+/)[0] || "tudo bem";
+  const capitalizado = primeiro.charAt(0).toUpperCase() + primeiro.slice(1);
+  return (
+    `Olá, *${capitalizado}*! 👋 Seja bem-vindo(a) ao *Grupo FIC*.\n\n` +
+    `É um prazer falar com você. Estou aqui para te ajudar a conhecer nossas empresas e conectar com o time certo.`
+  );
+}
+
 const MENU_INTENCAO =
   "Como você prefere seguir?\n\n" +
   "1⃣ Contratar serviços\n" +
@@ -332,6 +341,7 @@ export default async function handler(req, res) {
       await atualizarConversa(conversa.id, { etapa: 1, status: "bot" });
     } else if (conversa.etapa === 1) {
       const nome = texto.trim().slice(0, 80);
+      await responderCliente(conversa.id, waId, saudacaoAposNome(nome));
       await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
       await atualizarConversa(conversa.id, { etapa: 2, nome_cliente: nome });
     } else if (conversa.etapa === 2) {
