@@ -4,15 +4,16 @@
 // Fluxo:
 //   0 → boas-vindas (pede nome)
 //   1 → nome (pede empresa)
-//   2 → empresa (envia sobre + serviços + menu de intenção)
-//   3 → intenção (contratar / atendente / site)
+//   2 → empresa (atalhos numéricos + IA conversacional)
+//   3 → intenção (1/2/3 + IA sobre a empresa; encaminha especialista)
 // Env: WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, WEBHOOK_SECRET
-// Opcional: OPENAI_API_KEY — Whisper (entrada) + TTS (respostas do bot ao cliente)
+// Opcional: OPENAI_API_KEY — Whisper + chat (gpt-4o-mini) + TTS nas respostas ao cliente
 // ============================================================
 
 const TTS_VOICE = "nova";
 const TTS_MODEL = "tts-1";
 const TTS_MAX_CHARS = 800;
+const CHAT_MODEL = "gpt-4o-mini";
 
 const SUPABASE_URL = "https://wuuijbetsckjusnvdxts.supabase.co";
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1dWlqYmV0c2NranVzbnZkeHRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5NjAwODAsImV4cCI6MjEwMTUzNjA4MH0.VzHyjS2goE1tX0udysdjnuXcfym39jPkJWc3j-xFYbA";
@@ -224,6 +225,99 @@ function ehVoltarMenu(texto) {
     "trocar empresa",
     "empresas",
   ].includes(t);
+}
+
+function contextoEmpresasParaIA() {
+  return EMPRESAS.map((nome) => {
+    const info = EMPRESAS_INFO[nome];
+    return {
+      nome: info.nome,
+      sobre: String(info.sobre || "").replace(/\*/g, "").replace(/_/g, ""),
+      servicos: info.servicos,
+      site: info.site,
+    };
+  });
+}
+
+/**
+ * Resposta conversacional com OpenAI (EMPRESAS_INFO + histórico).
+ * Retorna { texto, acao, empresa } — acao: null | contratar | atendente | site | empresa
+ */
+async function assistenteConversacional({ conversa, textoUsuario, etapa }) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+  try {
+    const historico = await buscarUltimasMsgs(conversa.id, 12);
+    const msgsHist = historico
+      .filter((m) => m && (m.de === "cliente" || m.de === "bot") && m.texto)
+      .map((m) => ({
+        role: m.de === "cliente" ? "user" : "assistant",
+        content: String(m.texto).slice(0, 600),
+      }))
+      .slice(-10);
+
+    const empresaAtual = conversa.empresa && EMPRESAS_INFO[conversa.empresa]
+      ? conversa.empresa
+      : null;
+
+    const system = [
+      "Você é o assistente virtual do Grupo FIC no WhatsApp (pt-BR).",
+      "Seja caloroso, claro e objetivo (2 a 5 frases curtas). Use *negrito* do WhatsApp com moderação.",
+      "Baseie-se APENAS no catálogo de empresas abaixo. Não invente serviços, preços ou contatos.",
+      "Nunca diga apenas que não entendeu. Se faltar clareza, responda o que puder e oriente com gentileza.",
+      "Atalhos do cliente: digitar 1=contratar, 2=atendente, 3=site; 'retornar ao menu'; 'oi' reinicia (já tratados fora daqui).",
+      "Se o cliente quiser contratar ou falar com humano, use acao correspondente (não invente telefone de especialista).",
+      "Se identificar claramente uma empresa do catálogo, use acao=empresa e o nome EXATO do catálogo.",
+      "Responda SOMENTE JSON válido, sem markdown:",
+      '{"texto":"mensagem ao cliente","acao":null|"contratar"|"atendente"|"site"|"empresa","empresa":null|"NOME_EXATO"}',
+      `Etapa atual: ${etapa}. Nome do cliente: ${conversa.nome_cliente || "ainda não informado"}.`,
+      `Empresa em foco: ${empresaAtual || "nenhuma"}.`,
+      `Catálogo: ${JSON.stringify(contextoEmpresasParaIA())}`,
+    ].join("\n");
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        temperature: 0.4,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          ...msgsHist,
+          { role: "user", content: String(textoUsuario || "").slice(0, 1000) },
+        ],
+      }),
+    });
+    const body = await r.text();
+    if (!r.ok) {
+      console.error("chat fail", r.status, body);
+      return null;
+    }
+    const parsed = body ? JSON.parse(body) : null;
+    const raw = parsed?.choices?.[0]?.message?.content || "";
+    let data = null;
+    try { data = JSON.parse(raw); } catch { data = null; }
+    if (!data || typeof data.texto !== "string" || !data.texto.trim()) return null;
+
+    let acao = data.acao || null;
+    if (acao && !["contratar", "atendente", "site", "empresa"].includes(acao)) acao = null;
+    let empresa = data.empresa || null;
+    if (empresa && !EMPRESAS_INFO[empresa]) {
+      empresa = detectarEmpresa(String(empresa)) || null;
+    }
+    if (acao === "empresa" && !empresa) {
+      empresa = detectarEmpresa(String(textoUsuario || "")) || null;
+      if (!empresa) acao = null;
+    }
+    return { texto: data.texto.trim().slice(0, 1500), acao, empresa };
+  } catch (e) {
+    console.error("assistenteConversacional", e);
+    return null;
+  }
 }
 
 function secret() {
@@ -858,8 +952,13 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, menu: true, audio: Boolean(audioInfo) });
     }
 
-    if (conversa.status === "andamento" || conversa.status === "encerrado") {
-      return res.status(200).json({ ok: true, audio: Boolean(audioInfo) });
+    // Em andamento/encerrado/fila o bot não conversa (exceto oi/menu acima)
+    if (conversa.status !== "bot" && conversa.etapa !== 0) {
+      return res.status(200).json({
+        ok: true,
+        audio: Boolean(audioInfo),
+        transcript: Boolean(audioInfo && texto),
+      });
     }
 
     if (conversa.etapa === 0) {
@@ -869,37 +968,134 @@ export default async function handler(req, res) {
       const nome = texto.trim().slice(0, 80);
       await responderCliente(conversa.id, waId, saudacaoAposNome(nome));
       await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
-      await atualizarConversa(conversa.id, { etapa: 2, nome_cliente: nome });
+      await atualizarConversa(conversa.id, { etapa: 2, nome_cliente: nome, status: "bot" });
     } else if (conversa.etapa === 2) {
       const empresa = detectarEmpresa(texto);
       const info = empresa ? EMPRESAS_INFO[empresa] : null;
-      if (!info) {
-        await responderCliente(conversa.id, waId, "Não identifiquei a empresa. " + PERGUNTA_EMPRESA);
-      } else {
+      if (info) {
         await responderCliente(conversa.id, waId, montarApresentacao(info));
         await responderCliente(conversa.id, waId, MENU_INTENCAO);
         await atualizarConversa(conversa.id, { etapa: 3, empresa: info.nome, status: "bot" });
+      } else {
+        const ia = await assistenteConversacional({
+          conversa: { ...conversa, wa_id: waId },
+          textoUsuario: texto,
+          etapa: 2,
+        });
+        if (ia?.acao === "empresa" && ia.empresa && EMPRESAS_INFO[ia.empresa]) {
+          const escolhida = EMPRESAS_INFO[ia.empresa];
+          if (ia.texto) await responderCliente(conversa.id, waId, ia.texto);
+          await responderCliente(conversa.id, waId, montarApresentacao(escolhida));
+          await responderCliente(conversa.id, waId, MENU_INTENCAO);
+          await atualizarConversa(conversa.id, { etapa: 3, empresa: escolhida.nome, status: "bot" });
+        } else {
+          const textoIa = (ia?.texto || "").trim();
+          if (textoIa) {
+            await responderCliente(conversa.id, waId, textoIa);
+            const guiaMenu =
+              /\b[1-7]\b/.test(textoIa) ||
+              /RWB|IPROTECTOR|LEGALCERT|SINATRA|ANIMA|SCAN|LIV ECO/i.test(textoIa);
+            if (!guiaMenu) await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
+          } else {
+            await responderCliente(
+              conversa.id,
+              waId,
+              "Posso te ajudar a conhecer as empresas do Grupo FIC. Escolha uma opção ou me diga o que procura.\n\n" +
+                PERGUNTA_EMPRESA,
+            );
+          }
+        }
       }
     } else if (conversa.etapa === 3) {
       const info = EMPRESAS_INFO[conversa.empresa];
       if (!info) {
         await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
-        await atualizarConversa(conversa.id, { etapa: 2, empresa: null });
+        await atualizarConversa(conversa.id, { etapa: 2, empresa: null, status: "bot" });
       } else {
-        const intencao = detectarIntencao(texto);
+        let intencao = detectarIntencao(texto);
+        let ia = null;
         if (!intencao) {
-          await responderCliente(conversa.id, waId, "Não entendi. " + MENU_INTENCAO);
+          ia = await assistenteConversacional({
+            conversa: { ...conversa, wa_id: waId },
+            textoUsuario: texto,
+            etapa: 3,
+          });
+          if (ia?.acao === "contratar" || ia?.acao === "atendente" || ia?.acao === "site") {
+            intencao = ia.acao;
+          } else if (ia?.acao === "empresa" && ia.empresa && EMPRESAS_INFO[ia.empresa]) {
+            const outra = EMPRESAS_INFO[ia.empresa];
+            if (ia.texto) await responderCliente(conversa.id, waId, ia.texto);
+            await responderCliente(conversa.id, waId, montarApresentacao(outra));
+            await responderCliente(conversa.id, waId, MENU_INTENCAO);
+            await atualizarConversa(conversa.id, { etapa: 3, empresa: outra.nome, status: "bot" });
+            return res.status(200).json({
+              ok: true,
+              audio: Boolean(audioInfo),
+              transcript: Boolean(audioInfo && texto),
+              ia: true,
+            });
+          }
+        }
+
+        if (!intencao) {
+          const msg =
+            ia?.texto ||
+            (
+              `Sobre a *${info.nome}*, posso te contar os serviços ou te conectar com o time.\n\n` +
+              MENU_INTENCAO
+            );
+          await responderCliente(conversa.id, waId, msg);
         } else if (intencao === "site") {
           const msgSite =
-            `Sem problemas! Para outras dúvidas, consulte o site da *${info.nome}*:\n${info.site}\n\n` +
+            `Para outras dúvidas, consulte o site da *${info.nome}*:\n${info.site}\n\n` +
             `Se preferir:\n*1* — contratar serviços\n*2* — falar com um atendente\n\nOu digite *retornar ao menu*.`;
           await responderCliente(conversa.id, waId, msgSite);
           await atualizarConversa(conversa.id, {
             assunto: `${info.nome} · consultou o site`,
+            status: "bot",
           });
         } else {
           await encaminharParaEspecialista({ ...conversa, wa_id: waId }, info, intencao);
         }
+      }
+    } else if (conversa.status === "bot") {
+      // Qualquer outra etapa com bot ativo: conversa livre + orientação
+      const ia = await assistenteConversacional({
+        conversa: { ...conversa, wa_id: waId },
+        textoUsuario: texto,
+        etapa: conversa.etapa,
+      });
+      if (ia?.acao === "empresa" && ia.empresa && EMPRESAS_INFO[ia.empresa]) {
+        const escolhida = EMPRESAS_INFO[ia.empresa];
+        if (ia.texto) await responderCliente(conversa.id, waId, ia.texto);
+        await responderCliente(conversa.id, waId, montarApresentacao(escolhida));
+        await responderCliente(conversa.id, waId, MENU_INTENCAO);
+        await atualizarConversa(conversa.id, { etapa: 3, empresa: escolhida.nome, status: "bot" });
+      } else if (
+        (ia?.acao === "contratar" || ia?.acao === "atendente" || ia?.acao === "site") &&
+        conversa.empresa &&
+        EMPRESAS_INFO[conversa.empresa]
+      ) {
+        const info = EMPRESAS_INFO[conversa.empresa];
+        if (ia.acao === "site") {
+          await responderCliente(
+            conversa.id,
+            waId,
+            (ia.texto ? `${ia.texto}\n\n` : "") +
+              `Site da *${info.nome}*:\n${info.site}\n\n` +
+              MENU_INTENCAO,
+          );
+        } else {
+          if (ia.texto) await responderCliente(conversa.id, waId, ia.texto);
+          await encaminharParaEspecialista({ ...conversa, wa_id: waId }, info, ia.acao);
+        }
+      } else {
+        await responderCliente(
+          conversa.id,
+          waId,
+          ia?.texto ||
+            ("Posso ajudar com as empresas do Grupo FIC.\n\n" + PERGUNTA_EMPRESA),
+        );
       }
     }
 
