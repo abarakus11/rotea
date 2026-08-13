@@ -44,15 +44,21 @@ export async function carregarConversasLive(sb: SupabaseClient, nomesPorId: Reco
         inicio: hora(c.criado_em),
         espera: Math.max(0, Math.round((Date.now() - new Date(c.criado_em).getTime()) / 60000)),
         naoLidas: 0,
-        msgs: msgsConv.map(m => ({
-          id: m.id,
-          de: (["cliente", "bot", "atendente", "sistema"].includes(m.de) ? m.de : "sistema") as Msg["de"],
-          texto: m.texto,
-          hora: hora(m.criado_em),
-          tipo: m.tipo || "text",
-          mediaUrl: m.media_url ?? null,
-          mimeType: m.mime_type ?? null,
-        })),
+        msgs: msgsConv.map(m => {
+          const mediaUrl = m.media_url ?? null;
+          const tipoBruto = (m.tipo || "").trim().toLowerCase();
+          // Garante player mesmo se tipo vier vazio/legado, desde que haja media_url.
+          const tipo = tipoBruto || (mediaUrl ? "audio" : "text");
+          return {
+            id: m.id,
+            de: (["cliente", "bot", "atendente", "sistema"].includes(m.de) ? m.de : "sistema") as Msg["de"],
+            texto: m.texto,
+            hora: hora(m.criado_em),
+            tipo,
+            mediaUrl,
+            mimeType: m.mime_type ?? null,
+          };
+        }),
       } satisfies Chat,
       // Fallback JS: última mensagem, senão atualizado_em do banco
       ordem: msgsConv[msgsConv.length - 1]?.criado_em ?? c.atualizado_em ?? c.criado_em,

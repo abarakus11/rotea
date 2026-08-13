@@ -430,28 +430,49 @@ async function uploadWhatsappMedia(path, buffer, contentType) {
   return `${SUPABASE_URL}/storage/v1/object/public/whatsapp-media/${path}`;
 }
 
-/**
- * Whisper (opcional).
- * Retorna { text, error } — text preenchido em sucesso; error classifica falha
- * (missing_key | empty | quota | auth | format | http | network).
- */
-async function transcreverAudio(buffer, mimeType) {
+/** Monta FormData multipart para APIs estilo OpenAI Whisper. */
+function formWhisper(buffer, mimeType, model) {
+  const { file, filename, mime } = arquivoAudioParaForm(buffer, mimeType, "voice");
+  const form = new FormData();
+  if (typeof File !== "undefined" && file instanceof File) {
+    form.append("file", file);
+  } else {
+    form.append("file", file, filename);
+  }
+  form.append("model", model);
+  form.append("language", "pt");
+  form.append("response_format", "json");
+  return { form, filename, mime };
+}
+
+function classificarErroWhisper(status, body) {
+  let code = null;
+  let type = null;
+  try {
+    const err = body ? JSON.parse(body) : null;
+    code = err?.error?.code || null;
+    type = err?.error?.type || null;
+  } catch { /* ignore */ }
+  if (status === 401 || status === 403 || code === "invalid_api_key") return "auth";
+  if (
+    status === 429 ||
+    code === "insufficient_quota" ||
+    code === "credit_balance_exhausted" ||
+    type === "insufficient_quota"
+  ) {
+    return "quota";
+  }
+  if (status === 400) return "format";
+  return "http";
+}
+
+async function transcreverOpenAI(buffer, mimeType) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return { text: null, error: "missing_key" };
   if (!buffer?.length) return { text: null, error: "empty" };
   try {
-    const { file, filename, mime } = arquivoAudioParaForm(buffer, mimeType, "voice");
-    const form = new FormData();
-    // File já carrega o filename; Blob precisa do 3º arg (Node serverless / undici).
-    if (typeof File !== "undefined" && file instanceof File) {
-      form.append("file", file);
-    } else {
-      form.append("file", file, filename);
-    }
-    form.append("model", "whisper-1");
-    form.append("language", "pt");
-    form.append("response_format", "json");
-    console.log("whisper request", { bytes: buffer.length, mime, filename });
+    const { form, filename, mime } = formWhisper(buffer, mimeType, "whisper-1");
+    console.log("whisper openai request", { bytes: buffer.length, mime, filename });
     const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}` },
@@ -459,34 +480,62 @@ async function transcreverAudio(buffer, mimeType) {
     });
     const body = await r.text();
     if (!r.ok) {
-      let code = null;
-      let type = null;
-      try {
-        const err = body ? JSON.parse(body) : null;
-        code = err?.error?.code || null;
-        type = err?.error?.type || null;
-      } catch { /* ignore */ }
-      console.error("whisper fail", r.status, { code, type, body: body?.slice?.(0, 400) || body });
-      if (r.status === 401 || r.status === 403) return { text: null, error: "auth" };
-      if (
-        r.status === 429 ||
-        code === "insufficient_quota" ||
-        code === "credit_balance_exhausted" ||
-        type === "insufficient_quota"
-      ) {
-        return { text: null, error: "quota" };
-      }
-      if (r.status === 400) return { text: null, error: "format" };
-      return { text: null, error: "http" };
+      const error = classificarErroWhisper(r.status, body);
+      console.error("whisper openai fail", r.status, { error, body: body?.slice?.(0, 400) || body });
+      return { text: null, error };
     }
     const parsed = body ? JSON.parse(body) : null;
     const texto = (parsed?.text || "").trim();
     if (!texto) return { text: null, error: "empty" };
-    return { text: texto, error: null };
+    return { text: texto, error: null, provider: "openai" };
   } catch (e) {
-    console.error("whisper error", e);
+    console.error("whisper openai error", e);
     return { text: null, error: "network" };
   }
+}
+
+/** Fallback opcional (GROQ_API_KEY) — Whisper compatível, útil se OpenAI estiver sem crédito. */
+async function transcreverGroq(buffer, mimeType) {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) return { text: null, error: "missing_key" };
+  if (!buffer?.length) return { text: null, error: "empty" };
+  try {
+    const { form, filename, mime } = formWhisper(buffer, mimeType, "whisper-large-v3");
+    console.log("whisper groq request", { bytes: buffer.length, mime, filename });
+    const r = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    const body = await r.text();
+    if (!r.ok) {
+      const error = classificarErroWhisper(r.status, body);
+      console.error("whisper groq fail", r.status, { error, body: body?.slice?.(0, 400) || body });
+      return { text: null, error };
+    }
+    const parsed = body ? JSON.parse(body) : null;
+    const texto = (parsed?.text || "").trim();
+    if (!texto) return { text: null, error: "empty" };
+    return { text: texto, error: null, provider: "groq" };
+  } catch (e) {
+    console.error("whisper groq error", e);
+    return { text: null, error: "network" };
+  }
+}
+
+/**
+ * Whisper (opcional): OpenAI primeiro; se quota/auth, tenta Groq.
+ * Retorna { text, error, provider? }.
+ */
+async function transcreverAudio(buffer, mimeType) {
+  const openai = await transcreverOpenAI(buffer, mimeType);
+  if (openai.text) return openai;
+  if (openai.error === "quota" || openai.error === "auth" || openai.error === "missing_key") {
+    const groq = await transcreverGroq(buffer, mimeType);
+    if (groq.text) return groq;
+    if (groq.error && groq.error !== "missing_key") return groq;
+  }
+  return openai;
 }
 
 function extrairAudioMsg(msg) {
@@ -911,18 +960,42 @@ export default async function handler(req, res) {
       let mime = normalizeAudioMime(audioInfo.mime);
       let transcript = null;
       let whisperError = null;
+      let whisperProvider = null;
+      let buffer = null;
+
+      // 1) Download Meta — isolado para não perder Storage se Whisper falhar
       try {
-        const { buffer, mime: mimeDl } = await baixarMediaWhatsApp(audioInfo.mediaId);
-        mime = normalizeAudioMime(mimeDl || mime);
-        const path = `${conversa.id}/${Date.now()}_${audioInfo.mediaId}.${extFromMime(mime)}`;
-        const uploadMime = mime.startsWith("audio/") ? mime : "application/octet-stream";
-        mediaUrl = await uploadWhatsappMedia(path, buffer, uploadMime);
-        const whisper = await transcreverAudio(buffer, mime);
-        transcript = whisper.text;
-        whisperError = whisper.error;
+        const dl = await baixarMediaWhatsApp(audioInfo.mediaId);
+        buffer = dl.buffer;
+        mime = normalizeAudioMime(dl.mime || mime);
       } catch (e) {
-        console.error("audio pipeline", e);
-        whisperError = whisperError || "pipeline";
+        console.error("audio download", e);
+        whisperError = "pipeline";
+      }
+
+      // 2) Storage público — equipe ouve na plataforma mesmo sem transcript
+      if (buffer) {
+        try {
+          const path = `${conversa.id}/${Date.now()}_${audioInfo.mediaId}.${extFromMime(mime)}`;
+          const uploadMime = mime.startsWith("audio/") ? mime : "application/octet-stream";
+          mediaUrl = await uploadWhatsappMedia(path, buffer, uploadMime);
+          console.log("audio storage ok", { path, mediaUrl: Boolean(mediaUrl) });
+        } catch (e) {
+          console.error("audio storage", e);
+        }
+      }
+
+      // 3) Whisper (OpenAI → Groq opcional)
+      if (buffer) {
+        try {
+          const whisper = await transcreverAudio(buffer, mime);
+          transcript = whisper.text;
+          whisperError = whisper.error;
+          whisperProvider = whisper.provider || null;
+        } catch (e) {
+          console.error("audio whisper", e);
+          whisperError = whisperError || "pipeline";
+        }
       }
 
       if (transcript) {
@@ -934,20 +1007,23 @@ export default async function handler(req, res) {
           wa_media_id: audioInfo.mediaId,
         });
       } else {
-        const placeholder = mediaUrl ? "[Áudio]" : "[Áudio recebido]";
+        const placeholder = mediaUrl ? "Áudio" : "[Áudio recebido]";
         await salvarMsg(conversa.id, "cliente", placeholder, {
           tipo: "audio",
           media_url: mediaUrl,
           mime_type: mime,
           wa_media_id: audioInfo.mediaId,
         });
-        // Sem transcrição: no fluxo do bot, pede texto para continuar
+        // Sem transcrição: no fluxo do bot, pede texto; áudio fica na plataforma
         if (conversa.status === "bot") {
-          const temWhisper = Boolean(process.env.OPENAI_API_KEY);
+          const temStt = Boolean(process.env.OPENAI_API_KEY || process.env.GROQ_API_KEY);
           let msgAudio =
             "Recebi seu áudio 🎧. Por enquanto, responda por *texto* para eu continuar o atendimento.";
-          if (temWhisper) {
-            if (whisperError === "quota" || whisperError === "auth" || whisperError === "http" || whisperError === "network") {
+          if (temStt) {
+            if (whisperError === "quota") {
+              msgAudio =
+                "Recebi seu áudio e já está disponível para a equipe. Neste momento a transcrição automática está indisponível (cota da API). Pode digitar a mensagem para eu continuar?";
+            } else if (whisperError === "auth" || whisperError === "http" || whisperError === "network") {
               msgAudio =
                 "Recebi seu áudio, mas estou com uma instabilidade para ouvir agora. Pode digitar a mensagem ou tentar de novo em instantes?";
             } else {
@@ -963,6 +1039,7 @@ export default async function handler(req, res) {
           media: Boolean(mediaUrl),
           transcript: false,
           whisperError: whisperError || "unknown",
+          whisperProvider,
         });
       }
     } else {

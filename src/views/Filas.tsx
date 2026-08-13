@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Chat, Usuario, SETORES, CORES_SETOR } from "../data";
 import { TagStatus, TagEmpresa, Avatar, Botao } from "../ui";
+import { ehMsgAudio, rotuloPreviewAudio } from "../mediaMsg";
 
 interface Props {
   chats: Chat[];
@@ -75,11 +76,7 @@ export default function Filas({ chats, equipe, assumir }: Props) {
                       {(() => {
                         const m = [...c.msgs].reverse().find(x => x.de === "cliente");
                         if (!m) return "…";
-                        if (m.tipo === "audio") {
-                          const t = m.texto?.trim();
-                          if (!t || t === "[Áudio]" || t === "[Áudio recebido]") return "🎤 Áudio";
-                          return `🎤 ${t}`;
-                        }
+                        if (ehMsgAudio(m)) return rotuloPreviewAudio(m);
                         return `"${m.texto}"`;
                       })()}
                     </div>
