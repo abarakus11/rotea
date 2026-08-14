@@ -21,8 +21,8 @@ const BH_END = 20; // exclusivo → atendimento até 20:00 America/Sao_Paulo
 
 const LINK_AGENDA_FALLBACK = "CONFIGURE_LINK_AGENDA";
 const LINK_AGENDA_ADVISOR_FALLBACK = "CONFIGURE_LINK_AGENDA_ADVISOR";
-const COMERCIAL_WA_FALLBACK = "5511943870655";
-const COMERCIAL_NOME_FALLBACK = "Carlos Eber";
+const COMERCIAL_WA_FALLBACK = "551151946830";
+const COMERCIAL_NOME_FALLBACK = "Giovanna";
 
 const ABERTURA_NOME = [
   "Antes de eu te passar qualquer coisa: com quem eu falo?",
