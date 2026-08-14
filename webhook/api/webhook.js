@@ -1,13 +1,10 @@
 // ============================================================
-// ROTEA · Webhook da API oficial do WhatsApp (Meta Cloud API)
+// ROTEA · Webhook WhatsApp (Meta Cloud API) — FIC Capital
 // Número: +55 11 5304-9387
-// Fluxo:
-//   0 → boas-vindas (pede nome)
-//   1 → nome (pede empresa)
-//   2 → empresa (atalhos numéricos + IA conversacional)
-//   3 → intenção (1/2/3 + IA sobre a empresa; encaminha especialista)
+// Funil: abertura → descoberta → rotas A–H (PRO/SEC/RADAR/SIG/SEE/Advisor/Base/Fallback)
 // Env: WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, WEBHOOK_SECRET
-// Opcional: OPENAI_API_KEY — Whisper + chat (gpt-4o-mini) + TTS nas respostas ao cliente
+// Opcional: OPENAI_API_KEY (Whisper + TTS + theme_guess fallback)
+//          LINK_AGENDA, LINK_AGENDA_ADVISOR, FIC_COMERCIAL_WA, FIC_COMERCIAL_NOME
 // ============================================================
 
 const TTS_VOICE = "nova";
@@ -18,182 +15,164 @@ const CHAT_MODEL = "gpt-4o-mini";
 const SUPABASE_URL = "https://wuuijbetsckjusnvdxts.supabase.co";
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1dWlqYmV0c2NranVzbnZkeHRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5NjAwODAsImV4cCI6MjEwMTUzNjA4MH0.VzHyjS2goE1tX0udysdjnuXcfym39jPkJWc3j-xFYbA";
 
-const EMPRESAS = ["RWB", "LIV ECO HABITATS", "IPROTECTOR", "LEGALCERT", "SINATRA", "ANIMA", "SCAN ATIVOS"];
+const TZ = "America/Sao_Paulo";
+const BH_START = 9;
+const BH_END = 18; // exclusivo
 
-/**
- * Conteúdo por empresa — edite "sobre", "servicos" e "site".
- * Quando o cliente escolher a empresa, o bot envia essa apresentação
- * e depois o menu: contratar / atendente / site.
- */
-const EMPRESAS_INFO = {
-  RWB: {
-    nome: "RWB",
-    sobre:
-      "A *RWB* é um grupo de investimento privado focado no aumento da eficiência produtiva, ampliando o acesso a infraestrutura, logística e tecnologia em favor de agricultores, pecuaristas, agroindústrias e proprietários de ativos ambientais.\n\nEntregamos até *6× mais receita por hectare* com governança de padrão internacional.",
-    servicos: [
-      "Investimento privado para eficiência produtiva no agro",
-      "Acesso a infraestrutura, logística e tecnologia",
-      "Soluções para agricultores, pecuaristas e agroindústrias",
-      "Valorização de ativos ambientais",
-      "Governança de padrão internacional",
+const LINK_AGENDA_FALLBACK = "CONFIGURE_LINK_AGENDA";
+const LINK_AGENDA_ADVISOR_FALLBACK = "CONFIGURE_LINK_AGENDA_ADVISOR";
+const COMERCIAL_WA_FALLBACK = "5511943870655";
+const COMERCIAL_NOME_FALLBACK = "Carlos Eber";
+
+const ABERTURA_B2 = [
+  "Antes de eu te passar qualquer coisa: com quem eu falo, e de qual empresa?",
+  "Como posso te chamar? E qual a empresa?",
+  "Me diz seu nome e a empresa que eu já te direciono direito.",
+];
+
+const LGPD =
+  "Só um aviso rápido: seus dados ficam com a FIC Capital e são usados só pra esse atendimento. Nada de terceiros.";
+
+const ROTAS = {
+  A: {
+    produto: "PRO Invest",
+    keywords: [
+      "captar", "captacao", "investidor", "socio", "fundo", "aporte", "expandir",
+      "comprar terra", "comprar planta", "terra", "planta", "investimento", "captacao de",
     ],
-    site: "https://www.rwbagriinvest.com.br/",
-    especialistaWa: "556799797227",
-    especialistaNome: "Roberto Hayashi",
-    setor: "Comercial",
   },
-  "LIV ECO HABITATS": {
-    nome: "LIV ECO HABITATS",
-    sobre:
-      "A *LIV ECO HABITATS* faz parte do Grupo FIC.\n\n_(Aguardando texto oficial da empresa.)_",
-    servicos: [
-      "Serviço 1 — descrição breve",
-      "Serviço 2 — descrição breve",
-      "Serviço 3 — descrição breve",
+  B: {
+    produto: "SEC Finances",
+    keywords: [
+      "receita", "margem", "lucro", "vender mais", "holding", "exterior",
+      "reestruturar", "societario", "receita liquida",
     ],
-    site: "https://www.grupo-fic.com.br",
-    especialistaWa: "5514997790770",
-    especialistaNome: "Hugo Legramandi",
-    setor: "Comercial",
   },
-  IPROTECTOR: {
-    nome: "IPROTECTOR",
-    sobre:
-      "O *iProtector* é uma plataforma de tecnologia para agenciamento de *Proteção Pessoal*, *Patrimonial* e *Monitoramento Robótico* com *Treinamentos de Elite*.\n\nConectamos clientes, empresas de segurança, agentes protetores e fornecedores de tecnologias avançadas de gerenciamento de riscos.",
-    servicos: [
-      "Agenciamento de Proteção Pessoal",
-      "Proteção Patrimonial",
-      "Monitoramento Robótico",
-      "Treinamentos de Elite",
-      "Conexão com empresas de segurança, agentes e fornecedores de tecnologia",
+  C: {
+    produto: "RADAR Benefits",
+    keywords: [
+      "imposto", "tributo", "icms", "divida ativa", "pgfn", "incentivo",
+      "isencao", "subvencao", "execucao fiscal", "tributario", "divida",
     ],
-    site: "https://www.iprotector.com.br/",
-    especialistaWa: "5511943870655",
-    especialistaNome: "Carlos Eber",
-    setor: "Comercial",
   },
-  LEGALCERT: {
-    nome: "LEGALCERT",
-    sobre:
-      "A *LegalCert* é uma legaltech de gerenciamento de empresas essenciais para governança em padrão internacional.\n\nÉ direcionada à *captação de investimentos*, *aumento de receita* e *incentivos econômicos tributários*.",
-    servicos: [
-      "Gerenciamento de empresas essenciais",
-      "Governança em padrão internacional",
-      "Captação de investimentos",
-      "Estratégias de aumento de receita",
-      "Incentivos econômicos tributários",
+  D: {
+    produto: "SIG",
+    keywords: [
+      "sistema", "erp", "crm", "planilha", "gestao", "controle", "integrar", "integracao",
     ],
-    site: "https://www.legalcert.com.br/",
-    especialistaWa: "551151946830",
-    especialistaNome: "Giovanna Cabral",
-    setor: "Comercial",
   },
-  SINATRA: {
-    nome: "SINATRA",
-    sobre:
-      "O *Sinatra* é um clube exclusivo para apreciadores da boa música, da cultura refinada e dos momentos únicos.\n\nCada ambiente é uma composição — gastronomia autoral, encontros memoráveis e um serviço que antecipa o desejo antes do pedido.",
-    servicos: [
-      "Experiências gastronômicas autorais",
-      "Ambientes exclusivos com boa música e cultura refinada",
-      "Encontros e eventos memoráveis",
-      "Serviço personalizado de alto padrão",
-      "Clube privativo para momentos únicos",
+  E: {
+    produto: "SEE",
+    keywords: [
+      "plano", "contratar", "quanto custa", "pacote", "como funciona", "preco", "valor",
     ],
-    site: "https://www.sinatraclub.com.br/",
-    especialistaWa: "5511947930224",
-    especialistaNome: "Danielle",
-    setor: "Comercial",
   },
-  ANIMA: {
-    nome: "ANIMA",
-    sobre:
-      "*ANIMA — Family Martial Arts Club*\n\nUm clube familiar dedicado ao desenvolvimento físico, mental e emocional, por meio das artes marciais, da atividade física e das práticas de saúde integrativa.\n\n*Propósito:* fortalecer corpo, mente e caráter, promovendo disciplina, autoconfiança, saúde, longevidade e qualidade de vida para crianças, jovens e adultos.",
-    servicos: [
-      "Artes marciais para toda a família",
-      "Atividade física e condicionamento",
-      "Práticas de saúde integrativa",
-      "Desenvolvimento de disciplina e autoconfiança",
-      "Programas para crianças, jovens e adultos",
+  F: {
+    produto: "Programa Advisor",
+    keywords: [
+      "parceria", "ser consultor", "advisor", "indicar cliente", "escritorio", "licenca",
+      "credenciamento",
     ],
-    site: "https://www.animawc.com.br/",
-    especialistaWa: "5511943870655",
-    especialistaNome: "Carlos Eber",
-    setor: "Comercial",
   },
-  "SCAN ATIVOS": {
-    nome: "SCAN ATIVOS",
-    sobre:
-      "A *SCAN ATIVOS* permite negociar *ativos judiciais com liquidez e segurança*.\n\nPrecatórios, empresas, imóveis e garantias com *pagamento em escrow* e transferência formalizada sob acompanhamento jurídico da *LEGALCERT*.",
-    servicos: [
-      "Negociação de precatórios",
-      "Negociação de empresas",
-      "Negociação de imóveis",
-      "Garantias com pagamento em escrow",
-      "Transferência formalizada com acompanhamento jurídico da LEGALCERT",
+  G: {
+    produto: "Base ativa",
+    keywords: [
+      "cliente", "contrato", "andamento", "protocolo", "meu processo", "ja sou cliente",
+      "sou cliente", "parceiro",
     ],
-    site: "https://www.scanativos.com.br/",
-    especialistaWa: "551151070250",
-    especialistaNome: "Caroline Lima",
-    setor: "Comercial",
   },
 };
 
-const PERGUNTA_BOAS_VINDAS =
-  "Olá! 👋 Bem-vindo(a) ao atendimento do Grupo FIC. Sou o assistente virtual. Para começar, qual o seu nome?";
-const PERGUNTA_EMPRESA =
-  "Sobre qual empresa você gostaria de falar?\n\n1⃣ RWB\n2⃣ LIV ECO HABITATS\n3⃣ IPROTECTOR\n4⃣ LEGALCERT\n5⃣ SINATRA\n6⃣ ANIMA\n7⃣ SCAN ATIVOS\n\nResponda com o nome ou o número da opção.";
+// ---------- utils ----------
 
-function saudacaoAposNome(nome) {
-  const primeiro = (nome || "").trim().split(/\s+/)[0] || "tudo bem";
-  const capitalizado = primeiro.charAt(0).toUpperCase() + primeiro.slice(1);
-  return (
-    `Olá, *${capitalizado}*! 👋 Seja bem-vindo(a) ao *Grupo FIC*.\n\n` +
-    `É um prazer falar com você. Estou aqui para te ajudar a conhecer nossas empresas e conectar com o time certo.`
-  );
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
-const MENU_INTENCAO =
-  "Como você prefere seguir?\n\n" +
-  "1⃣ Contratar serviços\n" +
-  "2⃣ Falar com um atendente\n" +
-  "3⃣ Outras dúvidas — consultar o site\n\n" +
-  "Responda com o número da opção.";
-
-function montarApresentacao(info) {
-  const lista = info.servicos.map((s, i) => `${i + 1}. ${s}`).join("\n");
-  return (
-    `*${info.nome}*\n\n` +
-    `${info.sobre}\n\n` +
-    `*Serviços prestados:*\n${lista}`
-  );
-}
-
-function detectarEmpresa(texto) {
-  const t = texto.trim().toLowerCase();
-  const porNumero = { "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "7": 6 };
-  if (porNumero[t] !== undefined) return EMPRESAS[porNumero[t]];
-  if (/\bscan\b/.test(t) || t.includes("scanativos") || t.includes("scan ativos")) return "SCAN ATIVOS";
-  return EMPRESAS.find((e) => t.includes(e.toLowerCase())) ?? null;
-}
-
-/** 1=contratar | 2=atendente | 3=site | null */
-function detectarIntencao(texto) {
-  const t = texto.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (t === "1" || t.startsWith("1 ") || t.includes("contrat") || t.includes("servico")) return "contratar";
-  if (t === "2" || t.startsWith("2 ") || t.includes("atendent") || t.includes("humano")) return "atendente";
-  if (t === "3" || t.startsWith("3 ") || t.includes("site") || t.includes("duvida") || t.includes("consulta")) return "site";
-  return null;
-}
-
-/** Saudação / pedido de reinício do fluxo do bot */
-function ehReinicio(texto) {
-  const t = texto
-    .trim()
+function norm(texto) {
+  return String(texto || "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[!?.]+$/g, "")
     .trim();
+}
+
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function linkAgenda() {
+  return process.env.LINK_AGENDA || LINK_AGENDA_FALLBACK;
+}
+
+function linkAgendaAdvisor() {
+  return process.env.LINK_AGENDA_ADVISOR || LINK_AGENDA_ADVISOR_FALLBACK;
+}
+
+function comercialInfo() {
+  return {
+    especialistaWa: (process.env.FIC_COMERCIAL_WA || COMERCIAL_WA_FALLBACK).replace(/\D/g, ""),
+    especialistaNome: process.env.FIC_COMERCIAL_NOME || COMERCIAL_NOME_FALLBACK,
+    nome: "FIC Capital",
+    setor: "Comercial",
+  };
+}
+
+function fill(tpl, vars = {}) {
+  return String(tpl).replace(/\{\{(\w+)\}\}/g, (_, k) => {
+    const v = vars[k];
+    return v == null || v === "" ? "" : String(v);
+  });
+}
+
+function agoraSP() {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ,
+    weekday: "short",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(new Date()).map((p) => [p.type, p.value]));
+  const weekdayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const day = weekdayMap[parts.weekday] ?? new Date().getDay();
+  let hour = Number(parts.hour);
+  if (parts.hour === "24") hour = 0;
+  const minute = Number(parts.minute) || 0;
+  return { day, hour, minute };
+}
+
+function horaLabelSP() {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
+/** Mon–Fri 09:00–18:00 America/Sao_Paulo */
+function statusHorario() {
+  const { day, hour, minute } = agoraSP();
+  if (day === 0 || day === 6) return "fim_semana";
+  const mins = hour * 60 + minute;
+  if (mins >= BH_START * 60 && mins < BH_END * 60) return "comercial";
+  return "fora_horario";
+}
+
+function getEstado(conversa) {
+  const raw = conversa.bot_estado;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return { ...raw };
+  if (typeof raw === "string") {
+    try {
+      const p = JSON.parse(raw);
+      if (p && typeof p === "object") return p;
+    } catch { /* ignore */ }
+  }
+  return {};
+}
+
+function ehReinicio(texto) {
+  const t = norm(texto).replace(/[!?.]+$/g, "").trim();
   return [
     "oi", "ola", "oie", "oii", "oiii", "oiee",
     "hey", "hello", "hi", "eai", "eae", "fala",
@@ -203,122 +182,125 @@ function ehReinicio(texto) {
   ].includes(t);
 }
 
-/** Volta ao menu de empresas (mantém o nome) */
-function ehVoltarMenu(texto) {
-  const t = texto
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[!?.]+$/g, "")
-    .trim();
-  return [
-    "menu",
-    "voltar",
-    "retornar",
-    "retornar menu",
-    "retornar ao menu",
-    "voltar menu",
-    "voltar ao menu",
-    "menu anterior",
-    "outra empresa",
-    "trocar empresa",
-    "empresas",
-  ].includes(t);
-}
+/** Extrai nome + empresa de uma resposta livre. */
+function parseNomeEmpresa(texto, estado) {
+  const t = String(texto || "").trim();
+  let nome = estado.nome_parcial || null;
+  let empresa = estado.empresa_parcial || null;
 
-function contextoEmpresasParaIA() {
-  return EMPRESAS.map((nome) => {
-    const info = EMPRESAS_INFO[nome];
-    return {
-      nome: info.nome,
-      sobre: String(info.sobre || "").replace(/\*/g, "").replace(/_/g, ""),
-      servicos: info.servicos,
-      site: info.site,
-    };
-  });
-}
+  const mSou = t.match(/^(?:eu\s+)?(?:sou|me\s+chamo|meu\s+nome\s+(?:é|e))\s+([^,.\n]+)/i);
+  if (mSou) nome = mSou[1].trim().slice(0, 80);
 
-/**
- * Resposta conversacional com OpenAI (EMPRESAS_INFO + histórico).
- * Retorna { texto, acao, empresa } — acao: null | contratar | atendente | site | empresa
- */
-async function assistenteConversacional({ conversa, textoUsuario, etapa }) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return null;
-  try {
-    const historico = await buscarUltimasMsgs(conversa.id, 12);
-    const msgsHist = historico
-      .filter((m) => m && (m.de === "cliente" || m.de === "bot") && m.texto)
-      .map((m) => ({
-        role: m.de === "cliente" ? "user" : "assistant",
-        content: String(m.texto).slice(0, 600),
-      }))
-      .slice(-10);
+  const mEmp = t.match(/(?:da|de|empresa|da empresa|trabalho(?:\s+na|\s+na empresa)?|represento)\s+([^,.\n]+)/i);
+  if (mEmp) empresa = mEmp[1].trim().slice(0, 120);
 
-    const empresaAtual = conversa.empresa && EMPRESAS_INFO[conversa.empresa]
-      ? conversa.empresa
-      : null;
-
-    const system = [
-      "Você é o assistente virtual do Grupo FIC no WhatsApp (pt-BR).",
-      "Seja caloroso, claro e objetivo (2 a 5 frases curtas). Use *negrito* do WhatsApp com moderação.",
-      "Baseie-se APENAS no catálogo de empresas abaixo. Não invente serviços, preços ou contatos.",
-      "Nunca diga apenas que não entendeu. Se faltar clareza, responda o que puder e oriente com gentileza.",
-      "Atalhos do cliente: digitar 1=contratar, 2=atendente, 3=site; 'retornar ao menu'; 'oi' reinicia (já tratados fora daqui).",
-      "Se o cliente quiser contratar ou falar com humano, use acao correspondente (não invente telefone de especialista).",
-      "Se identificar claramente uma empresa do catálogo, use acao=empresa e o nome EXATO do catálogo.",
-      "Responda SOMENTE JSON válido, sem markdown:",
-      '{"texto":"mensagem ao cliente","acao":null|"contratar"|"atendente"|"site"|"empresa","empresa":null|"NOME_EXATO"}',
-      `Etapa atual: ${etapa}. Nome do cliente: ${conversa.nome_cliente || "ainda não informado"}.`,
-      `Empresa em foco: ${empresaAtual || "nenhuma"}.`,
-      `Catálogo: ${JSON.stringify(contextoEmpresasParaIA())}`,
-    ].join("\n");
-
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: CHAT_MODEL,
-        temperature: 0.4,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          ...msgsHist,
-          { role: "user", content: String(textoUsuario || "").slice(0, 1000) },
-        ],
-      }),
-    });
-    const body = await r.text();
-    if (!r.ok) {
-      console.error("chat fail", r.status, body);
-      return null;
+  // "Nome, Empresa" ou "Nome - Empresa" ou "Nome / Empresa"
+  if (!nome || !empresa) {
+    const parts = t.split(/\s*[,/\-–—|]\s*/).map((s) => s.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      if (!nome) nome = parts[0].slice(0, 80);
+      if (!empresa) empresa = parts.slice(1).join(" ").slice(0, 120);
     }
-    const parsed = body ? JSON.parse(body) : null;
-    const raw = parsed?.choices?.[0]?.message?.content || "";
-    let data = null;
-    try { data = JSON.parse(raw); } catch { data = null; }
-    if (!data || typeof data.texto !== "string" || !data.texto.trim()) return null;
-
-    let acao = data.acao || null;
-    if (acao && !["contratar", "atendente", "site", "empresa"].includes(acao)) acao = null;
-    let empresa = data.empresa || null;
-    if (empresa && !EMPRESAS_INFO[empresa]) {
-      empresa = detectarEmpresa(String(empresa)) || null;
-    }
-    if (acao === "empresa" && !empresa) {
-      empresa = detectarEmpresa(String(textoUsuario || "")) || null;
-      if (!empresa) acao = null;
-    }
-    return { texto: data.texto.trim().slice(0, 1500), acao, empresa };
-  } catch (e) {
-    console.error("assistenteConversacional", e);
-    return null;
   }
+
+  // "Nome da Empresa X" / "Nome Empresa X"
+  if (!empresa) {
+    const mDa = t.match(/^(.{2,40}?)\s+(?:da|de)\s+(.{2,80})$/i);
+    if (mDa) {
+      nome = nome || mDa[1].trim();
+      empresa = mDa[2].trim();
+    }
+  }
+
+  // Se só pedimos o que falta
+  if (estado.faltando === "nome" && !nome) {
+    nome = t.replace(/^(?:meu\s+nome\s+(?:é|e)\s+)/i, "").trim().slice(0, 80);
+  }
+  if (estado.faltando === "empresa" && !empresa) {
+    empresa = t.replace(/^(?:a\s+empresa\s+(?:é|e)\s+|empresa\s+)/i, "").trim().slice(0, 120);
+  }
+
+  // Uma única palavra/frase curta sem padrão → assume o que falta, senão nome
+  if (!nome && !empresa && t.length >= 2 && t.length <= 80 && !/[?]/.test(t)) {
+    if (estado.faltando === "empresa") empresa = t;
+    else if (estado.faltando === "nome") nome = t;
+    else if (!estado.pediu_faltante) {
+      // primeira resposta ambígua: se tiver 2+ tokens, primeiro=nome resto=empresa
+      const toks = t.split(/\s+/);
+      if (toks.length >= 3) {
+        nome = toks[0];
+        empresa = toks.slice(1).join(" ");
+      }
+    }
+  }
+
+  if (nome) nome = nome.replace(/^(sou|eu sou)\s+/i, "").trim();
+  return { nome: nome || null, empresa: empresa || null };
 }
+
+function matchRota(texto) {
+  const t = norm(texto);
+  const scores = {};
+  for (const [rota, cfg] of Object.entries(ROTAS)) {
+    let s = 0;
+    for (const kw of cfg.keywords) {
+      if (t.includes(norm(kw))) s += kw.length > 8 ? 2 : 1;
+    }
+    // atalhos numéricos / nomes de produto
+    if (rota === "A" && (/\bpro\s*invest\b/.test(t) || t === "1" || t.includes("captacao"))) s += 3;
+    if (rota === "B" && (/\bsec\b/.test(t) || t === "2" || t.includes("receita liquida"))) s += 3;
+    if (rota === "C" && (/\bradar\b/.test(t) || t === "3" || t.includes("imposto"))) s += 2;
+    if (rota === "D" && (/\bsig\b/.test(t) || t.includes("erp"))) s += 2;
+    if (rota === "E" && (/\bsee\b/.test(t) || t.includes("plano"))) s += 2;
+    if (rota === "F" && (/\badvisor\b/.test(t) || t.includes("consultor"))) s += 2;
+    if (rota === "G" && (t.includes("sou cliente") || t.includes("ja sou"))) s += 3;
+    scores[rota] = s;
+  }
+  let best = null;
+  let bestScore = 0;
+  for (const [rota, s] of Object.entries(scores)) {
+    if (s > bestScore) {
+      best = rota;
+      bestScore = s;
+    }
+  }
+  if (bestScore <= 0) return null;
+  return best;
+}
+
+function temaProvavelLabel(rota) {
+  const map = {
+    A: "captação de investimento",
+    B: "aumentar receita líquida",
+    C: "reduzir imposto ou dívida",
+    D: "sistema / gestão",
+    E: "planos e como funciona",
+    F: "parceria Advisor",
+    G: "acompanhamento de conta",
+  };
+  return map[rota] || "o que a empresa precisa agora";
+}
+
+function detectarDividaVsImposto(texto) {
+  const t = norm(texto);
+  if (/(divida|passivo|pgfn|execucao|atrasad|parcelamento)/.test(t)) return "divida";
+  if (/(imposto|mensal|corrente|tributo|icms|todo mes)/.test(t)) return "imposto";
+  if (/divida|atras|passiv/.test(t)) return "divida";
+  if (/imposto|pag(o|a)|corrente/.test(t)) return "imposto";
+  return null;
+}
+
+function insistePreco(texto) {
+  const t = norm(texto);
+  return /(preco|valor|quanto custa|orcamento|tabela|pacote|me diga o|quero saber o custo|sem reuniao)/.test(t);
+}
+
+function foraPerfil(texto) {
+  const t = norm(texto);
+  return /(muito pequeno|nao se paga|fora de perfil|ainda nao|fatura pouco|pequena empresa|nao tenho porte)/.test(t);
+}
+
+// ---------- supabase / meta infra (inalterada em espírito) ----------
 
 function secret() {
   return process.env.WEBHOOK_SECRET || process.env.VERIFY_TOKEN || "";
@@ -360,7 +342,6 @@ async function salvarMsg(conversaId, de, texto, extras = {}) {
 function normalizeAudioMime(mime) {
   const m = String(mime || "").toLowerCase().split(";")[0].trim();
   if (!m || m === "application/octet-stream") return "audio/ogg";
-  // WhatsApp voice notes: audio/ogg; codecs=opus (ou audio/opus)
   if (m === "audio/opus") return "audio/ogg";
   return m;
 }
@@ -377,7 +358,6 @@ function extFromMime(mime) {
   return "ogg";
 }
 
-/** Monta File/Blob com nome+ext corretos para multipart (Whisper / Meta). */
 function arquivoAudioParaForm(buffer, mimeType, basename = "audio") {
   const mime = normalizeAudioMime(mimeType);
   const ext = extFromMime(mime);
@@ -389,7 +369,6 @@ function arquivoAudioParaForm(buffer, mimeType, basename = "audio") {
   return { file: new Blob([bytes], { type: mime }), filename, mime };
 }
 
-/** Baixa mídia da Meta Cloud API (id → url → bytes). Auth Bearer nos dois passos. */
 async function baixarMediaWhatsApp(mediaId) {
   const token = process.env.WHATSAPP_TOKEN;
   if (!token || !mediaId) throw new Error("media: token ou id ausente");
@@ -402,7 +381,6 @@ async function baixarMediaWhatsApp(mediaId) {
   const url = info.url;
   const mime = normalizeAudioMime(info.mime_type || "audio/ogg");
   if (!url) throw new Error("media: url ausente na Meta");
-  // CDN da Meta exige Authorization; redeclarar headers evita perder Bearer em redirect.
   const bin = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
     redirect: "follow",
@@ -413,7 +391,6 @@ async function baixarMediaWhatsApp(mediaId) {
   return { buffer, mime, sha256: info.sha256 || null };
 }
 
-/** Envia áudio ao bucket público whatsapp-media. */
 async function uploadWhatsappMedia(path, buffer, contentType) {
   const r = await fetch(`${SUPABASE_URL}/storage/v1/object/whatsapp-media/${path}`, {
     method: "POST",
@@ -430,7 +407,6 @@ async function uploadWhatsappMedia(path, buffer, contentType) {
   return `${SUPABASE_URL}/storage/v1/object/public/whatsapp-media/${path}`;
 }
 
-/** Monta FormData multipart para APIs estilo OpenAI Whisper. */
 function formWhisper(buffer, mimeType, model) {
   const { file, filename, mime } = arquivoAudioParaForm(buffer, mimeType, "voice");
   const form = new FormData();
@@ -494,7 +470,6 @@ async function transcreverOpenAI(buffer, mimeType) {
   }
 }
 
-/** Fallback opcional (GROQ_API_KEY) — Whisper compatível, útil se OpenAI estiver sem crédito. */
 async function transcreverGroq(buffer, mimeType) {
   const key = process.env.GROQ_API_KEY;
   if (!key) return { text: null, error: "missing_key" };
@@ -523,10 +498,6 @@ async function transcreverGroq(buffer, mimeType) {
   }
 }
 
-/**
- * Whisper (opcional): OpenAI primeiro; se quota/auth, tenta Groq.
- * Retorna { text, error, provider? }.
- */
 async function transcreverAudio(buffer, mimeType) {
   const openai = await transcreverOpenAI(buffer, mimeType);
   if (openai.text) return openai;
@@ -553,7 +524,6 @@ function extrairAudioMsg(msg) {
   return null;
 }
 
-/** Remove markdown WhatsApp e limita tamanho para TTS (texto completo ainda vai como mensagem). */
 function textoParaTTS(texto) {
   let t = String(texto || "")
     .replace(/\*([^*]+)\*/g, "$1")
@@ -574,7 +544,6 @@ function textoParaTTS(texto) {
   return `${base.trim()}…`;
 }
 
-/** OpenAI TTS → bytes MP3. Null se sem chave / falha / texto vazio. */
 async function gerarAudioTTS(texto) {
   const key = process.env.OPENAI_API_KEY;
   const input = textoParaTTS(texto);
@@ -607,7 +576,6 @@ async function gerarAudioTTS(texto) {
   }
 }
 
-/** Upload multipart para Meta Cloud API → media_id. */
 async function uploadMediaMeta(buffer, mimeType, filename) {
   const phoneId = process.env.PHONE_NUMBER_ID;
   const token = process.env.WHATSAPP_TOKEN;
@@ -673,10 +641,6 @@ async function enviarWhatsAppAudio(para, mediaId) {
   return { ok: true, destino, wamid, mediaId };
 }
 
-/**
- * Gera TTS, sobe na Meta e envia áudio. Opcionalmente grava no Storage para o painel.
- * Falhas são engolidas — o texto já foi (ou será) enviado.
- */
 async function enviarRespostaAudio(conversaId, waId, texto) {
   try {
     const tts = await gerarAudioTTS(texto);
@@ -744,7 +708,6 @@ async function enviarWhatsApp(para, texto) {
   return { ok: true, destino, waId, wamid };
 }
 
-/** Resposta ao cliente: texto + áudio TTS (falha de TTS não bloqueia o texto). */
 async function responderCliente(conversaId, waId, texto) {
   const envio = await enviarWhatsApp(waId, texto);
   const audio = envio.ok ? await enviarRespostaAudio(conversaId, waId, texto) : null;
@@ -762,20 +725,6 @@ async function responderCliente(conversaId, waId, texto) {
     await salvarMsg(conversaId, "sistema", "Falha ao enviar no WhatsApp: verifique token e Phone Number ID.");
   }
   return envio;
-}
-
-async function buscarUltimasMsgs(conversaId, limite = 10) {
-  try {
-    const rows = await rpc("wa_ultimas_msgs", {
-      p_secret: secret(),
-      p_conversa_id: conversaId,
-      p_limite: limite,
-    });
-    return Array.isArray(rows) ? rows.slice().reverse() : [];
-  } catch (e) {
-    console.error("wa_ultimas_msgs", e);
-    return [];
-  }
 }
 
 async function enviarWhatsAppTemplate(para, templateName, languageCode, bodyParams) {
@@ -823,18 +772,22 @@ async function enviarWhatsAppTemplate(para, templateName, languageCode, bodyPara
   };
 }
 
-async function notificarEspecialista(conversa, info, intencao) {
-  const nome = conversa.nome_cliente || "Cliente";
+async function notificarEspecialista(conversa, contexto) {
+  const info = comercialInfo();
+  const nome = conversa.nome_cliente || contexto.nome || "Cliente";
+  const empresa = conversa.empresa || contexto.empresa || "—";
   const waDigits = String(conversa.wa_id || "").replace(/\D/g, "");
   const telCliente = waDigits ? `+${waDigits}` : (conversa.wa_id || "—");
   const linkWa = waDigits ? `https://wa.me/${waDigits}` : "";
-  const rotulo =
-    intencao === "contratar" ? "Quer CONTRATAR serviços" :
-    intencao === "atendente" ? "Quer falar com um atendente" :
-    "Contato geral";
-  const params = [info.nome, nome, telCliente, rotulo];
+  const rota = contexto.rota || "—";
+  const produto = contexto.produto || (ROTAS[rota]?.produto) || "Comercial";
+  const respostas = contexto.respostas || {};
+  const resumoResp = Object.entries(respostas)
+    .map(([k, v]) => `• ${k}: ${v}`)
+    .join("\n");
+  const rotulo = `Rota ${rota} · ${produto}`;
+  const params = ["FIC Capital", nome, telCliente, rotulo];
 
-  // 1) Templates UTILITY (funcionam sem janela de 24h, quando APPROVED)
   let envio = await enviarWhatsAppTemplate(info.especialistaWa, "rotea_lead_alerta", "pt_BR", params);
   let via = "template:rotea_lead_alerta";
   if (!envio.ok) {
@@ -842,18 +795,18 @@ async function notificarEspecialista(conversa, info, intencao) {
     via = "template:rotea_novo_lead";
   }
 
-  // 2) Fallback: texto livre (só entrega bem se o especialista já falou com o número oficial nas últimas 24h)
   if (!envio.ok) {
     const paraQuem = info.especialistaNome ? `Olá, *${info.especialistaNome}*!` : "Olá!";
     const aviso =
       `${paraQuem}\n\n` +
-      `🔔 *Novo atendimento — ${info.nome}*\n\n` +
+      `🔔 *Novo lead — FIC Capital*\n\n` +
       `*Nome:* ${nome}\n` +
-      `*WhatsApp do cliente:* ${telCliente}\n` +
-      (linkWa ? `*Abrir conversa:* ${linkWa}\n` : "") +
-      `*Motivo:* ${rotulo}\n` +
-      `*Empresa:* ${info.nome}\n\n` +
-      `Por favor, fale com o cliente pelo WhatsApp.`;
+      `*Empresa:* ${empresa}\n` +
+      `*WhatsApp:* ${telCliente}\n` +
+      (linkWa ? `*Abrir:* ${linkWa}\n` : "") +
+      `*Rota:* ${rota} · ${produto}\n` +
+      (resumoResp ? `\n*Respostas:*\n${resumoResp}\n` : "") +
+      `\nPor favor, fale com o cliente pelo WhatsApp.`;
     envio = await enviarWhatsApp(info.especialistaWa, aviso);
     via = "texto_livre";
   }
@@ -862,21 +815,18 @@ async function notificarEspecialista(conversa, info, intencao) {
     await salvarMsg(
       conversa.id,
       "sistema",
-      `Especialista ${info.especialistaNome || ""} +${envio.waId || info.especialistaWa} notificado · ${rotulo}` +
+      `Comercial ${info.especialistaNome} +${envio.waId || info.especialistaWa} notificado · ${rotulo}` +
         ` · via ${via}` +
-        (envio.wamid ? ` · ${envio.wamid}` : "") +
-        (via === "texto_livre"
-          ? " · ⚠ template ainda pendente na Meta — se o especialista não abriu conversa com o número oficial, a entrega pode falhar"
-          : ""),
+        (envio.wamid ? ` · ${envio.wamid}` : ""),
     );
   } else {
     await salvarMsg(
       conversa.id,
       "sistema",
-      `Falha ao avisar especialista +${info.especialistaWa}: ${String(envio.erro || "erro").slice(0, 200)}`,
+      `Falha ao avisar comercial +${info.especialistaWa}: ${String(envio.erro || "erro").slice(0, 200)}`,
     );
   }
-  return envio;
+  return { envio, info, produto };
 }
 
 async function processarStatuses(statuses) {
@@ -903,27 +853,895 @@ async function processarStatuses(statuses) {
   }
 }
 
-async function encaminharParaEspecialista(conversa, info, intencao) {
-  // Avisa SOMENTE o especialista — o cliente NÃO recebe o contato dele
-  const envio = await notificarEspecialista(conversa, info, intencao);
+/** OpenAI leve só para tema_provável no Fallback / ambíguo. */
+async function guessTemaOpenAI(texto) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+  try {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              'Classifique a mensagem do lead FIC Capital. Responda JSON: {"rota":"A"|"B"|"C"|"D"|"E"|"F"|"G"|null,"tema":"frase curta em pt-BR"}. ' +
+              "A=captação/PRO Invest, B=receita/SEC, C=imposto/RADAR, D=sistema/SIG, E=planos/SEE, F=Advisor, G=cliente ativo. Se incerto, rota null.",
+          },
+          { role: "user", content: String(texto || "").slice(0, 500) },
+        ],
+      }),
+    });
+    const body = await r.text();
+    if (!r.ok) return null;
+    const parsed = body ? JSON.parse(body) : null;
+    const raw = parsed?.choices?.[0]?.message?.content || "";
+    const data = JSON.parse(raw);
+    const rota = data?.rota && ROTAS[data.rota] ? data.rota : null;
+    const tema = typeof data?.tema === "string" ? data.tema.trim().slice(0, 80) : null;
+    return { rota, tema };
+  } catch (e) {
+    console.error("guessTemaOpenAI", e);
+    return null;
+  }
+}
 
-  const msgCliente = envio.ok
-    ? (
-      intencao === "contratar"
-        ? `Ótimo! Um especialista da *${info.nome}* já foi avisado e vai falar com você sobre a contratação. ⏳\n\nJá conhece o canal do podcast no YouTube? Se ainda não, vale a visita: https://www.youtube.com/@ficcionariospodcast\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
-        : `Perfeito! Um atendente da *${info.nome}* já foi avisado e vai falar com você em breve. ⏳\n\nJá conhece o canal do podcast no YouTube? Se ainda não, vale a visita: https://www.youtube.com/@ficcionariospodcast\n\n_Se quiser voltar ao menu, digite: retornar ao menu_`
-    )
-    : `Registrei seu pedido da *${info.nome}*. Nossa equipe vai retornar em breve.\n\n_Digite: retornar ao menu_`;
+// ---------- fluxo FIC Capital ----------
 
-  await responderCliente(conversa.id, conversa.wa_id, msgCliente);
+async function persistEstado(conversa, estado, extra = {}) {
+  const patch = {
+    bot_estado: estado,
+    status: extra.status || conversa.status || "bot",
+    ...extra,
+  };
+  delete patch.bot_estado; // set explicitly below
   await atualizarConversa(conversa.id, {
+    ...patch,
+    bot_estado: estado,
+  });
+  Object.assign(conversa, patch, { bot_estado: estado });
+}
+
+async function handoffHumano(conversa, estado, motivo = "handoff") {
+  const info = comercialInfo();
+  const vars = {
+    nome: conversa.nome_cliente || estado.nome_parcial || "você",
+    empresa: conversa.empresa || estado.empresa_parcial || "empresa",
+    consultor: info.especialistaNome,
+    produto: ROTAS[estado.rota]?.produto || estado.produto || "o seu caso",
+  };
+
+  const { envio } = await notificarEspecialista(
+    { ...conversa, nome_cliente: vars.nome, empresa: vars.empresa },
+    {
+      rota: estado.rota || "H",
+      produto: vars.produto,
+      nome: vars.nome,
+      empresa: vars.empresa,
+      respostas: estado.respostas || {},
+      motivo,
+    },
+  );
+
+  const msgCliente = fill(
+    "Vou te passar pro {{consultor}} agora — ele cuida de {{produto}} e conhece bem o seu segmento. Já mandei todo o contexto, você não precisa repetir nada.",
+    vars,
+  );
+  await responderCliente(conversa.id, conversa.wa_id, msgCliente);
+
+  estado.passo = "handoff";
+  estado.handoff_em = new Date().toISOString();
+  await persistEstado(conversa, estado, {
     etapa: 4,
-    empresa: info.nome,
-    setor: info.setor,
     status: "fila",
-    assunto: `${info.nome} · ${intencao}`,
+    assunto: `FIC Capital · ${estado.rota || "H"} · ${vars.produto} · ${motivo}`,
+    setor: "Comercial",
+    nome_cliente: vars.nome !== "você" ? vars.nome : conversa.nome_cliente,
+    empresa: vars.empresa !== "empresa" ? vars.empresa : conversa.empresa,
+  });
+  return envio;
+}
+
+async function enviarAberturaComercial(conversa, estado) {
+  await responderCliente(conversa.id, conversa.wa_id, "Oi! Aqui é do comercial da FIC Capital.");
+  if (!estado.lgpd_enviado) {
+    await sleep(1500);
+    await responderCliente(conversa.id, conversa.wa_id, LGPD);
+    estado.lgpd_enviado = true;
+  }
+  await sleep(4000);
+  await responderCliente(conversa.id, conversa.wa_id, pick(ABERTURA_B2));
+  estado.passo = "aguardando_nome_empresa";
+  estado.faltando = null;
+  estado.pediu_faltante = false;
+  await persistEstado(conversa, estado, { etapa: 1, status: "bot" });
+}
+
+async function enviarForaHorario(conversa, estado) {
+  const msg = fill(
+    "Oi! Aqui é do comercial da FIC Capital. Já são {{hora}} por aqui, então respondo com calma amanhã cedo.\n\nMas adianta uma coisa: é sobre captação, imposto ou receita? Assim eu já chego com a pessoa certa.",
+    { hora: horaLabelSP() },
+  );
+  await responderCliente(conversa.id, conversa.wa_id, msg);
+  if (!estado.lgpd_enviado) {
+    await sleep(1200);
+    await responderCliente(conversa.id, conversa.wa_id, LGPD);
+    estado.lgpd_enviado = true;
+  }
+  estado.passo = "fora_horario";
+  await persistEstado(conversa, estado, { etapa: 5, status: "bot" });
+}
+
+async function enviarFimSemana(conversa, estado) {
+  const nome = conversa.nome_cliente || estado.nome_parcial || "";
+  const msg = nome
+    ? fill(
+      "Oi, {{nome}}! Recebi sua mensagem. O time volta segunda de manhã e você é o primeiro da fila.\n\nSe quiser adiantar, me conta o que precisa que eu já deixo encaminhado.",
+      { nome },
+    )
+    : "Oi! Recebi sua mensagem. O time volta segunda de manhã e você é o primeiro da fila.\n\nSe quiser adiantar, me conta o que precisa que eu já deixo encaminhado.";
+  await responderCliente(conversa.id, conversa.wa_id, msg);
+  if (!estado.lgpd_enviado) {
+    await sleep(1200);
+    await responderCliente(conversa.id, conversa.wa_id, LGPD);
+    estado.lgpd_enviado = true;
+  }
+  estado.passo = "fim_semana";
+  await persistEstado(conversa, estado, { etapa: 5, status: "bot" });
+}
+
+async function enviarDescoberta(conversa, estado) {
+  const nome = conversa.nome_cliente;
+  const empresa = conversa.empresa;
+  await responderCliente(conversa.id, conversa.wa_id, fill("Prazer, {{nome}}.", { nome }));
+  await sleep(5000);
+  await responderCliente(
+    conversa.id,
+    conversa.wa_id,
+    "A FIC Capital trabalha com três frentes principais: captar investimento, aumentar receita líquida sem vender mais e reduzir imposto dentro da lei. Tudo ad exitum — a gente só ganha quando o resultado entra no seu caixa.",
+  );
+  await sleep(2000);
+  await responderCliente(
+    conversa.id,
+    conversa.wa_id,
+    fill(
+      "Qual dos três está mais perto do que a {{empresa}} precisa hoje?\n\n(Se for outra coisa, escreve com suas palavras que eu entendo.)",
+      { empresa },
+    ),
+  );
+  estado.passo = "aguardando_intencao";
+  estado.fallback_tentativas = 0;
+  await persistEstado(conversa, estado, {
+    etapa: 2,
+    status: "bot",
+    nome_cliente: nome,
+    empresa,
   });
 }
+
+async function iniciarRota(conversa, estado, rota) {
+  estado.rota = rota;
+  estado.respostas = estado.respostas || {};
+  estado.fallback_tentativas = 0;
+  const nome = conversa.nome_cliente || "você";
+  const empresa = conversa.empresa || "empresa";
+
+  if (rota === "A") {
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Boa. É o PRO Invest: estruturar a captação com governança em padrão internacional — fundo multimercado, sócio estratégico ou parceria sobre nova receita, via SCP ou SPE.",
+    );
+    await sleep(4000);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Deixa eu entender o tamanho antes de te passar pro time. Quanto a {{empresa}} faturou no último ano, mais ou menos?\n\nAté R$ 10M · R$ 10M a 30M · R$ 30M a 100M · R$ 100M a 300M · acima disso",
+        { empresa },
+      ),
+    );
+    estado.passo = "A.2";
+  } else if (rota === "B") {
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Essa é a frente que mais surpreende empresário, {{nome}}. O SEC Finances aumenta a receita líquida sem precisar vender uma unidade a mais — modulação mercantil, reenquadramento econômico e ajuste da estrutura societária.",
+        { nome },
+      ),
+    );
+    await sleep(4000);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Pra eu saber se faz sentido no seu caso: qual o faturamento anual aproximado?\n\nAté R$ 10M · R$ 10M a 30M · R$ 30M a 100M · acima de R$ 100M",
+    );
+    estado.passo = "B.2";
+  } else if (rota === "C") {
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Certo. O RADAR Benefits trabalha os dois lados: reduzir imposto corrente por imunidades, isenções, subvenções e programas especiais — e também reduzir dívida ativa.",
+    );
+    await sleep(4000);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Me diz uma coisa: hoje o problema é mais o imposto que você paga todo mês ou a dívida que já está lá atrás?",
+    );
+    estado.passo = "C.2";
+  } else if (rota === "D") {
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Faz sentido. O SIG é o sistema integral de gerenciamento: ERP, CRM e CFT no mesmo lugar, com implantação chave na mão e operação contínua depois.",
+    );
+    await sleep(4000);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Hoje vocês usam algum sistema ou está tudo em planilha?",
+    );
+    estado.passo = "D.2";
+  } else if (rota === "E") {
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Boa pergunta, {{nome}}. A jornada é organizada em três planos — BASIS, PRO e LEADER — conforme o estágio e o faturamento da empresa.",
+        { nome },
+      ),
+    );
+    await sleep(4000);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Só que qual deles serve pra você depende de dois números: faturamento anual e regime tributário. Consegue me passar?",
+    );
+    estado.passo = "E.2";
+  } else if (rota === "F") {
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Que bom que você perguntou. O Programa Advisor licencia o seu escritório como Executivo Regional — você passa a operar os seis pilares da FIC Capital com funil por segmento, apoio institucional e participação nos resultados.",
+    );
+    await sleep(4000);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Antes de te mandar o material: você atua hoje como contador, advogado, consultor financeiro ou empresário?",
+    );
+    estado.passo = "F.2";
+  } else if (rota === "G") {
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Ah, você já é da casa. Deixa eu te tirar da fila comercial então.",
+    );
+    await sleep(3000);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Me passa o CNPJ ou o nome da empresa e o que você precisa — encaminho direto pro responsável pela sua conta.",
+    );
+    estado.passo = "G.2";
+  }
+
+  await persistEstado(conversa, estado, {
+    etapa: 3,
+    status: "bot",
+    assunto: `FIC Capital · rota ${rota}`,
+  });
+}
+
+async function aposAgenda(conversa, estado, respostaAgenda) {
+  estado.respostas = estado.respostas || {};
+  estado.respostas.agenda_preferencia = String(respostaAgenda || "").slice(0, 200);
+  const link = estado.rota === "F" ? linkAgendaAdvisor() : linkAgenda();
+  await responderCliente(conversa.id, conversa.wa_id, link);
+  await sleep(1500);
+  await handoffHumano(conversa, estado, "agenda");
+}
+
+async function processarRota(conversa, estado, texto) {
+  const passo = estado.passo;
+  const nome = conversa.nome_cliente || "você";
+  const empresa = conversa.empresa || "empresa";
+  estado.respostas = estado.respostas || {};
+
+  // ---- A ----
+  if (passo === "A.2") {
+    estado.respostas.faturamento = texto.slice(0, 200);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Certo, {{nome}}. Nessa faixa a gente costuma trabalhar bem.\n\nE o recurso seria pra quê? Giro, expansão, compra de ativo ou reorganizar dívida?",
+        { nome },
+      ),
+    );
+    estado.passo = "A.3";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "A.3") {
+    estado.respostas.uso_recurso = texto.slice(0, 200);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Entendi. Última: vocês são Lucro Real, Presumido ou Simples?",
+    );
+    estado.passo = "A.4";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "A.4") {
+    estado.respostas.regime = texto.slice(0, 120);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Perfeito. Já tenho o suficiente pra abrir o diagnóstico gratuito — é a leitura jurídica, contábil e fiscal da operação, sem custo e sem compromisso.\n\nSão 30 minutos. Prefere ainda esta semana ou na que vem?",
+    );
+    estado.passo = "A.5";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "A.5") {
+    await aposAgenda(conversa, estado, texto);
+    return;
+  }
+
+  // ---- B ----
+  if (passo === "B.2") {
+    estado.respostas.faturamento = texto.slice(0, 200);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "E o regime é Lucro Real, Presumido ou Simples?",
+    );
+    estado.passo = "B.3";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "B.3") {
+    estado.respostas.regime = texto.slice(0, 120);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Última: a empresa opera em quantos estados? Tem alguma operação fora do Brasil?",
+    );
+    estado.passo = "B.4";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "B.4") {
+    estado.respostas.estados_exterior = texto.slice(0, 200);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Ótimo. Com isso o time já monta a leitura preliminar.\n\nO caminho é o diagnóstico gratuito, 30 minutos — e em até 24h úteis você recebe o plano de ação com escopo e prazo.\n\nMelhor de manhã ou à tarde?",
+    );
+    estado.passo = "B.5";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "B.5") {
+    await aposAgenda(conversa, estado, texto);
+    return;
+  }
+
+  // ---- C ----
+  if (passo === "C.2") {
+    const ramo = detectarDividaVsImposto(texto);
+    estado.respostas.c_tipo = texto.slice(0, 200);
+    if (ramo === "divida" || (!ramo && /divida|atras|passiv|pgfn|execuc/i.test(norm(texto)))) {
+      estado.ramo_c = "divida";
+      await responderCliente(
+        conversa.id,
+        conversa.wa_id,
+        "Entendi. Essa dívida está em qual esfera — federal, estadual, municipal ou mais de uma?",
+      );
+      estado.passo = "C.3";
+    } else if (ramo === "imposto" || !ramo) {
+      // default / imposto corrente
+      estado.ramo_c = ramo === "imposto" ? "imposto" : (ramo || "imposto");
+      if (!ramo) {
+        // ambíguo: pergunta de novo uma vez
+        if (!estado.c2_retry) {
+          estado.c2_retry = true;
+          await responderCliente(
+            conversa.id,
+            conversa.wa_id,
+            "Me diz só pra eu não errar: é mais o imposto do mês a mês ou a dívida que já ficou pra trás?",
+          );
+          await persistEstado(conversa, estado);
+          return;
+        }
+        estado.ramo_c = "imposto";
+      }
+      await responderCliente(
+        conversa.id,
+        conversa.wa_id,
+        "Entendi. Qual o faturamento anual e o regime tributário?",
+      );
+      estado.passo = "C.4";
+    }
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "C.3") {
+    estado.respostas.esfera = texto.slice(0, 120);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Certo. Valor aproximado do passivo consolidado?",
+    );
+    estado.passo = "C.3b";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "C.3b") {
+    estado.respostas.passivo = texto.slice(0, 120);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Já tem parcelamento ativo ou execução fiscal em andamento?",
+    );
+    estado.passo = "C.3c";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "C.3c") {
+    estado.respostas.parcelamento_execucao = texto.slice(0, 200);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Perfeito, {{nome}}. Nossos protocolos são validados por ex-procuradores e ex-auditores — gente que já esteve do outro lado do balcão. Nesse tipo de tese isso pesa.\n\nVou abrir o diagnóstico gratuito pra você. Consegue 30 minutos esta semana?",
+        { nome },
+      ),
+    );
+    estado.passo = "C.5";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "C.4") {
+    estado.respostas.faturamento_regime = texto.slice(0, 200);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "E o segmento — indústria, agro, alimentício, farmacêutico, logística ou tecnologia?",
+    );
+    estado.passo = "C.4b";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "C.4b") {
+    estado.respostas.segmento = texto.slice(0, 120);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Perfeito, {{nome}}. Nossos protocolos são validados por ex-procuradores e ex-auditores — gente que já esteve do outro lado do balcão. Nesse tipo de tese isso pesa.\n\nVou abrir o diagnóstico gratuito pra você. Consegue 30 minutos esta semana?",
+        { nome },
+      ),
+    );
+    estado.passo = "C.5";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "C.5") {
+    await aposAgenda(conversa, estado, texto);
+    return;
+  }
+
+  // ---- D ----
+  if (passo === "D.2") {
+    estado.respostas.sistema_atual = texto.slice(0, 200);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "E quantas pessoas usariam? (1 a 10 · 11 a 50 · 51 a 200 · mais de 200)",
+    );
+    estado.passo = "D.3";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "D.3") {
+    estado.respostas.usuarios = texto.slice(0, 80);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Certo. O time faz uma demonstração de 30 minutos já com o cenário da {{empresa}}.\n\nTe mando os horários?",
+        { empresa },
+      ),
+    );
+    estado.passo = "D.4";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "D.4") {
+    await aposAgenda(conversa, estado, texto);
+    return;
+  }
+
+  // ---- E ----
+  if (passo === "E.2") {
+    estado.respostas.faturamento_regime = texto.slice(0, 200);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Perfeito. Nessa faixa o caminho natural é começar pelo diagnóstico, e aí o time já te indica o plano certo — evita você pagar por escopo que não precisa.\n\nSem custo. Quer que eu reserve 30 minutos?",
+    );
+    estado.passo = "E.3";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "E.3") {
+    if (insistePreco(texto) || /nao|só o preço|so o preco|sem reuniao|sem diagnostico/.test(norm(texto))) {
+      await responderCliente(
+        conversa.id,
+        conversa.wa_id,
+        "Te entendo, e vou ser direto: o grosso da nossa remuneração é ad exitum, incide sobre o resultado auferido e homologado. Não tem como eu te dar número sem ver a operação — seria chute, e chute nesse assunto sai caro pros dois lados.",
+      );
+      estado.passo = "E.4";
+      estado.e_preco_insist = true;
+      await persistEstado(conversa, estado);
+      return;
+    }
+    await aposAgenda(conversa, estado, texto);
+    return;
+  }
+  if (passo === "E.4") {
+    if (insistePreco(texto) || foraPerfil(texto)) {
+      await responderCliente(
+        conversa.id,
+        conversa.wa_id,
+        fill(
+          "{{nome}}, vou ser honesto com você: nessa faixa o nosso modelo ainda não se paga, e eu não quero te vender coisa errada. Guardo seu contato e te procuro quando a operação crescer — pode ser?",
+          { nome },
+        ),
+      );
+      estado.passo = "fora_perfil";
+      await persistEstado(conversa, estado, {
+        status: "bot",
+        assunto: "FIC Capital · fora de perfil (SEE)",
+      });
+      return;
+    }
+    await aposAgenda(conversa, estado, texto);
+    return;
+  }
+
+  // ---- F ----
+  if (passo === "F.2") {
+    estado.respostas.atuacao = texto.slice(0, 120);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "E já tem carteira de clientes empresariais rodando?",
+    );
+    estado.passo = "F.3";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "F.3") {
+    estado.respostas.carteira = texto.slice(0, 120);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Qual sua cidade e estado?",
+    );
+    estado.passo = "F.4";
+    await persistEstado(conversa, estado);
+    return;
+  }
+  if (passo === "F.4") {
+    estado.respostas.cidade_estado = texto.slice(0, 120);
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Bom perfil, {{nome}}. Vou te encaminhar pro time de credenciamento.\n\nEles fazem uma apresentação de 30 minutos com o modelo completo, condições e território disponível na sua região.\n\nAgenda aqui: {{link}}",
+        { nome, link: linkAgendaAdvisor() },
+      ),
+    );
+    estado.passo = "F.5";
+    await persistEstado(conversa, estado);
+    await sleep(2000);
+    await handoffHumano(conversa, estado, "advisor");
+    return;
+  }
+
+  // ---- G ----
+  if (passo === "G.2") {
+    estado.respostas.conta = texto.slice(0, 300);
+    await handoffHumano(conversa, estado, "base_ativa");
+    return;
+  }
+
+  // passo desconhecido na rota → handoff
+  await handoffHumano(conversa, estado, "passo_invalido");
+}
+
+async function processarFallback(conversa, estado, texto) {
+  const nome = conversa.nome_cliente || "você";
+  const empresa = conversa.empresa || "empresa";
+  const tentativas = (estado.fallback_tentativas || 0) + 1;
+  estado.fallback_tentativas = tentativas;
+
+  if (tentativas === 1) {
+    let tema = estado.tema_provavel;
+    let rotaGuess = matchRota(texto);
+    if (!tema) {
+      const ia = await guessTemaOpenAI(texto);
+      if (ia?.tema) tema = ia.tema;
+      if (ia?.rota) rotaGuess = ia.rota;
+    }
+    if (!tema && rotaGuess) tema = temaProvavelLabel(rotaGuess);
+    if (!tema) tema = "o que a empresa precisa agora";
+    estado.tema_provavel = tema;
+    if (rotaGuess) estado.rota_sugerida = rotaGuess;
+
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Deixa eu ver se peguei certo, {{nome}} — você tá falando mais de {{tema_provavel}}, é isso?",
+        { nome, tema_provavel: tema },
+      ),
+    );
+    estado.passo = "H.1";
+    await persistEstado(conversa, estado);
+    return;
+  }
+
+  if (tentativas === 2 || estado.passo === "H.1") {
+    // se confirmou tema e temos rota sugerida, segue
+    const t = norm(texto);
+    if ((/^(sim|isso|exato|pode|certo|uhum|aham)/.test(t) || t.includes("isso mesmo")) && estado.rota_sugerida) {
+      await iniciarRota(conversa, estado, estado.rota_sugerida);
+      return;
+    }
+    // se agora casou keyword, inicia
+    const rota = matchRota(texto);
+    if (rota) {
+      await iniciarRota(conversa, estado, rota);
+      return;
+    }
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      fill(
+        "Melhor eu não chutar. Me descreve em uma frase o que tá pegando aí na {{empresa}} que eu te ligo na pessoa certa.",
+        { empresa },
+      ),
+    );
+    estado.passo = "H.2";
+    await persistEstado(conversa, estado);
+    return;
+  }
+
+  // 3ª → handoff
+  await responderCliente(
+    conversa.id,
+    conversa.wa_id,
+    "Vou te passar pro consultor agora, é mais rápido. Um minuto.",
+  );
+  await sleep(1500);
+  await handoffHumano(conversa, estado, "fallback_3");
+}
+
+async function processarIntencao(conversa, estado, texto) {
+  let rota = matchRota(texto);
+  if (!rota) {
+    const ia = await guessTemaOpenAI(texto);
+    if (ia?.rota) {
+      rota = ia.rota;
+    } else if (ia?.tema) {
+      estado.tema_provavel = ia.tema;
+    }
+  }
+  if (rota) {
+    await iniciarRota(conversa, estado, rota);
+    return;
+  }
+  await processarFallback(conversa, estado, texto);
+}
+
+async function processarMensagemBot(conversa, texto) {
+  let estado = getEstado(conversa);
+  const horario = statusHorario();
+
+  // reinício
+  if (ehReinicio(texto) && estado.passo && estado.passo !== "inicio") {
+    estado = { lgpd_enviado: Boolean(estado.lgpd_enviado) };
+    await atualizarConversa(conversa.id, {
+      nome_cliente: null,
+      empresa: null,
+      assunto: null,
+      setor: null,
+      atendente_id: null,
+      etapa: 0,
+      status: "bot",
+      bot_estado: estado,
+    });
+    conversa.nome_cliente = null;
+    conversa.empresa = null;
+    conversa.status = "bot";
+    conversa.etapa = 0;
+    conversa.bot_estado = estado;
+    await salvarMsg(conversa.id, "sistema", "Fluxo FIC Capital reiniciado pelo cliente");
+  }
+
+  // humano já assumiu
+  if (conversa.status !== "bot" && estado.passo === "handoff") {
+    return;
+  }
+  if (conversa.status !== "bot" && conversa.etapa === 4) {
+    return;
+  }
+
+  const passo = estado.passo || "inicio";
+
+  // primeiro contato / reinício
+  if (!passo || passo === "inicio" || conversa.etapa === 0) {
+    if (horario === "fim_semana") {
+      await enviarFimSemana(conversa, estado);
+      return;
+    }
+    if (horario === "fora_horario") {
+      await enviarForaHorario(conversa, estado);
+      return;
+    }
+    await enviarAberturaComercial(conversa, estado);
+    return;
+  }
+
+  // fora do horário / fim de semana — coleta tema e aguarda
+  if (passo === "fora_horario" || passo === "fim_semana") {
+    estado.respostas = estado.respostas || {};
+    estado.respostas.fora_horario_msg = texto.slice(0, 400);
+    const rota = matchRota(texto);
+    if (rota) estado.rota = rota;
+    const parsed = parseNomeEmpresa(texto, estado);
+    if (parsed.nome) {
+      estado.nome_parcial = parsed.nome;
+      conversa.nome_cliente = parsed.nome;
+    }
+    if (parsed.empresa) {
+      estado.empresa_parcial = parsed.empresa;
+      conversa.empresa = parsed.empresa;
+    }
+    if (passo === "fim_semana") {
+      await responderCliente(
+        conversa.id,
+        conversa.wa_id,
+        fill(
+          "Perfeito{{nome}}. Já deixei encaminhado — segunda de manhã você é prioridade.",
+          { nome: conversa.nome_cliente ? `, ${conversa.nome_cliente}` : "" },
+        ),
+      );
+    } else {
+      await responderCliente(
+        conversa.id,
+        conversa.wa_id,
+        "Combinado. Amanhã cedo eu retorno com a pessoa certa. Obrigado!",
+      );
+    }
+    estado.passo = "aguardando_retorno_horario";
+    await persistEstado(conversa, estado, {
+      status: "bot",
+      nome_cliente: conversa.nome_cliente || null,
+      empresa: conversa.empresa || null,
+      assunto: `FIC Capital · fora horário · ${rota || "tema livre"}`,
+    });
+    return;
+  }
+
+  if (passo === "aguardando_retorno_horario") {
+    // se voltou no horário comercial, segue abertura/descoberta
+    if (horario === "comercial") {
+      if (conversa.nome_cliente && conversa.empresa) {
+        await enviarDescoberta(conversa, estado);
+        return;
+      }
+      await enviarAberturaComercial(conversa, estado);
+      return;
+    }
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Ainda fora do expediente — assim que o time entrar, seguimos de onde paramos.",
+    );
+    return;
+  }
+
+  if (passo === "fora_perfil") {
+    await responderCliente(
+      conversa.id,
+      conversa.wa_id,
+      "Combinado. Quando fizer sentido, é só chamar aqui.",
+    );
+    return;
+  }
+
+  // nome + empresa
+  if (passo === "aguardando_nome_empresa") {
+    const parsed = parseNomeEmpresa(texto, estado);
+    let nome = parsed.nome || conversa.nome_cliente || estado.nome_parcial;
+    let empresa = parsed.empresa || conversa.empresa || estado.empresa_parcial;
+
+    if (nome) estado.nome_parcial = nome;
+    if (empresa) estado.empresa_parcial = empresa;
+
+    if (!nome && !empresa) {
+      await responderCliente(
+        conversa.id,
+        conversa.wa_id,
+        "Me passa seu nome e a empresa, por favor — assim eu te direciono direito.",
+      );
+      estado.pediu_faltante = true;
+      await persistEstado(conversa, estado);
+      return;
+    }
+    if (!nome) {
+      await responderCliente(conversa.id, conversa.wa_id, "E com quem eu falo?");
+      estado.faltando = "nome";
+      estado.pediu_faltante = true;
+      await persistEstado(conversa, estado, { empresa: empresa || null });
+      return;
+    }
+    if (!empresa) {
+      await responderCliente(conversa.id, conversa.wa_id, "E de qual empresa?");
+      estado.faltando = "empresa";
+      estado.pediu_faltante = true;
+      await persistEstado(conversa, estado, { nome_cliente: nome });
+      conversa.nome_cliente = nome;
+      return;
+    }
+
+    conversa.nome_cliente = nome;
+    conversa.empresa = empresa;
+    estado.faltando = null;
+    await persistEstado(conversa, estado, {
+      nome_cliente: nome,
+      empresa,
+      etapa: 2,
+    });
+    await enviarDescoberta(conversa, estado);
+    return;
+  }
+
+  if (passo === "aguardando_intencao" || passo === "H.1" || passo === "H.2") {
+    if (passo === "H.1" || passo === "H.2") {
+      await processarFallback(conversa, estado, texto);
+      return;
+    }
+    await processarIntencao(conversa, estado, texto);
+    return;
+  }
+
+  // dentro de rota A–G
+  if (passo && /^[A-G]/.test(passo)) {
+    await processarRota(conversa, estado, texto);
+    return;
+  }
+
+  // fallback genérico
+  await processarFallback(conversa, estado, texto);
+}
+
+// ---------- handler ----------
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
@@ -953,6 +1771,7 @@ export default async function handler(req, res) {
     if (!isText && !audioInfo) return res.status(200).json({ ok: true });
 
     const conversa = await acharOuCriarConversa(waId);
+    conversa.wa_id = conversa.wa_id || waId;
     let texto = "";
 
     if (audioInfo) {
@@ -963,7 +1782,6 @@ export default async function handler(req, res) {
       let whisperProvider = null;
       let buffer = null;
 
-      // 1) Download Meta — isolado para não perder Storage se Whisper falhar
       try {
         const dl = await baixarMediaWhatsApp(audioInfo.mediaId);
         buffer = dl.buffer;
@@ -973,7 +1791,6 @@ export default async function handler(req, res) {
         whisperError = "pipeline";
       }
 
-      // 2) Storage público — equipe ouve na plataforma mesmo sem transcript
       if (buffer) {
         try {
           const path = `${conversa.id}/${Date.now()}_${audioInfo.mediaId}.${extFromMime(mime)}`;
@@ -985,7 +1802,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // 3) Whisper (OpenAI → Groq opcional)
       if (buffer) {
         try {
           const whisper = await transcreverAudio(buffer, mime);
@@ -1014,11 +1830,10 @@ export default async function handler(req, res) {
           mime_type: mime,
           wa_media_id: audioInfo.mediaId,
         });
-        // Sem transcrição: no fluxo do bot, pede texto; áudio fica na plataforma
         if (conversa.status === "bot") {
           const temStt = Boolean(process.env.OPENAI_API_KEY || process.env.GROQ_API_KEY);
           let msgAudio =
-            "Recebi seu áudio 🎧. Por enquanto, responda por *texto* para eu continuar o atendimento.";
+            "Recebi seu áudio. Por enquanto, responda por texto para eu continuar o atendimento.";
           if (temStt) {
             if (whisperError === "quota") {
               msgAudio =
@@ -1047,206 +1862,13 @@ export default async function handler(req, res) {
       await salvarMsg(conversa.id, "cliente", texto);
     }
 
-    // Sempre que mandar "oi" (ou saudação), reinicia o fluxo do bot
-    if (ehReinicio(texto)) {
-      await responderCliente(conversa.id, waId, PERGUNTA_BOAS_VINDAS);
-      await atualizarConversa(conversa.id, {
-        etapa: 1,
-        status: "bot",
-        empresa: null,
-        assunto: null,
-        setor: null,
-        nome_cliente: null,
-        atendente_id: null,
-      });
-      await salvarMsg(conversa.id, "sistema", "Fluxo do bot reiniciado pelo cliente");
-      return res.status(200).json({ ok: true, reinicio: true, audio: Boolean(audioInfo) });
-    }
-
-    // "retornar ao menu" → volta para a escolha de empresas
-    if (ehVoltarMenu(texto)) {
-      const nome = conversa.nome_cliente;
-      if (nome) {
-        await responderCliente(
-          conversa.id,
-          waId,
-          `Certo! Voltando ao menu de empresas.`,
-        );
-        await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
-        await atualizarConversa(conversa.id, {
-          etapa: 2,
-          status: "bot",
-          empresa: null,
-          assunto: null,
-          setor: null,
-          atendente_id: null,
-        });
-      } else {
-        await responderCliente(conversa.id, waId, PERGUNTA_BOAS_VINDAS);
-        await atualizarConversa(conversa.id, {
-          etapa: 1,
-          status: "bot",
-          empresa: null,
-          assunto: null,
-          setor: null,
-          atendente_id: null,
-        });
-      }
-      await salvarMsg(conversa.id, "sistema", "Cliente retornou ao menu de empresas");
-      return res.status(200).json({ ok: true, menu: true, audio: Boolean(audioInfo) });
-    }
-
-    // Em andamento/encerrado/fila o bot não conversa (exceto oi/menu acima)
-    if (conversa.status !== "bot" && conversa.etapa !== 0) {
-      return res.status(200).json({
-        ok: true,
-        audio: Boolean(audioInfo),
-        transcript: Boolean(audioInfo && texto),
-      });
-    }
-
-    if (conversa.etapa === 0) {
-      await responderCliente(conversa.id, waId, PERGUNTA_BOAS_VINDAS);
-      await atualizarConversa(conversa.id, { etapa: 1, status: "bot" });
-    } else if (conversa.etapa === 1) {
-      const nome = texto.trim().slice(0, 80);
-      await responderCliente(conversa.id, waId, saudacaoAposNome(nome));
-      await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
-      await atualizarConversa(conversa.id, { etapa: 2, nome_cliente: nome, status: "bot" });
-    } else if (conversa.etapa === 2) {
-      const empresa = detectarEmpresa(texto);
-      const info = empresa ? EMPRESAS_INFO[empresa] : null;
-      if (info) {
-        await responderCliente(conversa.id, waId, montarApresentacao(info));
-        await responderCliente(conversa.id, waId, MENU_INTENCAO);
-        await atualizarConversa(conversa.id, { etapa: 3, empresa: info.nome, status: "bot" });
-      } else {
-        const ia = await assistenteConversacional({
-          conversa: { ...conversa, wa_id: waId },
-          textoUsuario: texto,
-          etapa: 2,
-        });
-        if (ia?.acao === "empresa" && ia.empresa && EMPRESAS_INFO[ia.empresa]) {
-          const escolhida = EMPRESAS_INFO[ia.empresa];
-          if (ia.texto) await responderCliente(conversa.id, waId, ia.texto);
-          await responderCliente(conversa.id, waId, montarApresentacao(escolhida));
-          await responderCliente(conversa.id, waId, MENU_INTENCAO);
-          await atualizarConversa(conversa.id, { etapa: 3, empresa: escolhida.nome, status: "bot" });
-        } else {
-          const textoIa = (ia?.texto || "").trim();
-          if (textoIa) {
-            await responderCliente(conversa.id, waId, textoIa);
-            const guiaMenu =
-              /\b[1-7]\b/.test(textoIa) ||
-              /RWB|IPROTECTOR|LEGALCERT|SINATRA|ANIMA|SCAN|LIV ECO/i.test(textoIa);
-            if (!guiaMenu) await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
-          } else {
-            await responderCliente(
-              conversa.id,
-              waId,
-              "Posso te ajudar a conhecer as empresas do Grupo FIC. Escolha uma opção ou me diga o que procura.\n\n" +
-                PERGUNTA_EMPRESA,
-            );
-          }
-        }
-      }
-    } else if (conversa.etapa === 3) {
-      const info = EMPRESAS_INFO[conversa.empresa];
-      if (!info) {
-        await responderCliente(conversa.id, waId, PERGUNTA_EMPRESA);
-        await atualizarConversa(conversa.id, { etapa: 2, empresa: null, status: "bot" });
-      } else {
-        let intencao = detectarIntencao(texto);
-        let ia = null;
-        if (!intencao) {
-          ia = await assistenteConversacional({
-            conversa: { ...conversa, wa_id: waId },
-            textoUsuario: texto,
-            etapa: 3,
-          });
-          if (ia?.acao === "contratar" || ia?.acao === "atendente" || ia?.acao === "site") {
-            intencao = ia.acao;
-          } else if (ia?.acao === "empresa" && ia.empresa && EMPRESAS_INFO[ia.empresa]) {
-            const outra = EMPRESAS_INFO[ia.empresa];
-            if (ia.texto) await responderCliente(conversa.id, waId, ia.texto);
-            await responderCliente(conversa.id, waId, montarApresentacao(outra));
-            await responderCliente(conversa.id, waId, MENU_INTENCAO);
-            await atualizarConversa(conversa.id, { etapa: 3, empresa: outra.nome, status: "bot" });
-            return res.status(200).json({
-              ok: true,
-              audio: Boolean(audioInfo),
-              transcript: Boolean(audioInfo && texto),
-              ia: true,
-            });
-          }
-        }
-
-        if (!intencao) {
-          const msg =
-            ia?.texto ||
-            (
-              `Sobre a *${info.nome}*, posso te contar os serviços ou te conectar com o time.\n\n` +
-              MENU_INTENCAO
-            );
-          await responderCliente(conversa.id, waId, msg);
-        } else if (intencao === "site") {
-          const msgSite =
-            `Para outras dúvidas, consulte o site da *${info.nome}*:\n${info.site}\n\n` +
-            `Se preferir:\n*1* — contratar serviços\n*2* — falar com um atendente\n\nOu digite *retornar ao menu*.`;
-          await responderCliente(conversa.id, waId, msgSite);
-          await atualizarConversa(conversa.id, {
-            assunto: `${info.nome} · consultou o site`,
-            status: "bot",
-          });
-        } else {
-          await encaminharParaEspecialista({ ...conversa, wa_id: waId }, info, intencao);
-        }
-      }
-    } else if (conversa.status === "bot") {
-      // Qualquer outra etapa com bot ativo: conversa livre + orientação
-      const ia = await assistenteConversacional({
-        conversa: { ...conversa, wa_id: waId },
-        textoUsuario: texto,
-        etapa: conversa.etapa,
-      });
-      if (ia?.acao === "empresa" && ia.empresa && EMPRESAS_INFO[ia.empresa]) {
-        const escolhida = EMPRESAS_INFO[ia.empresa];
-        if (ia.texto) await responderCliente(conversa.id, waId, ia.texto);
-        await responderCliente(conversa.id, waId, montarApresentacao(escolhida));
-        await responderCliente(conversa.id, waId, MENU_INTENCAO);
-        await atualizarConversa(conversa.id, { etapa: 3, empresa: escolhida.nome, status: "bot" });
-      } else if (
-        (ia?.acao === "contratar" || ia?.acao === "atendente" || ia?.acao === "site") &&
-        conversa.empresa &&
-        EMPRESAS_INFO[conversa.empresa]
-      ) {
-        const info = EMPRESAS_INFO[conversa.empresa];
-        if (ia.acao === "site") {
-          await responderCliente(
-            conversa.id,
-            waId,
-            (ia.texto ? `${ia.texto}\n\n` : "") +
-              `Site da *${info.nome}*:\n${info.site}\n\n` +
-              MENU_INTENCAO,
-          );
-        } else {
-          if (ia.texto) await responderCliente(conversa.id, waId, ia.texto);
-          await encaminharParaEspecialista({ ...conversa, wa_id: waId }, info, ia.acao);
-        }
-      } else {
-        await responderCliente(
-          conversa.id,
-          waId,
-          ia?.texto ||
-            ("Posso ajudar com as empresas do Grupo FIC.\n\n" + PERGUNTA_EMPRESA),
-        );
-      }
-    }
+    await processarMensagemBot({ ...conversa, wa_id: waId }, texto);
 
     return res.status(200).json({
       ok: true,
       audio: Boolean(audioInfo),
       transcript: Boolean(audioInfo && texto),
+      funil: "fic_capital",
     });
   } catch (e) {
     console.error("webhook error", e);

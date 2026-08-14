@@ -26,10 +26,15 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     ok: true,
+    funil: "fic_capital",
     whatsapp_token: Boolean(token),
     phone_number_id: Boolean(phoneId),
     verify_token: Boolean(verify),
     webhook_secret: Boolean(secret),
+    openai: Boolean(process.env.OPENAI_API_KEY),
+    link_agenda: Boolean(process.env.LINK_AGENDA),
+    link_agenda_advisor: Boolean(process.env.LINK_AGENDA_ADVISOR),
+    fic_comercial_wa: Boolean(process.env.FIC_COMERCIAL_WA),
     numero_exibido: "1153049387",
     webhook_url: "https://rotea-webhook.vercel.app/api/webhook",
     meta,
