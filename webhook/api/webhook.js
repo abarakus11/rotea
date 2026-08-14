@@ -17,17 +17,23 @@ const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 
 const TZ = "America/Sao_Paulo";
 const BH_START = 9;
-const BH_END = 18; // exclusivo
+const BH_END = 20; // exclusivo → atendimento até 20:00 America/Sao_Paulo
 
 const LINK_AGENDA_FALLBACK = "CONFIGURE_LINK_AGENDA";
 const LINK_AGENDA_ADVISOR_FALLBACK = "CONFIGURE_LINK_AGENDA_ADVISOR";
 const COMERCIAL_WA_FALLBACK = "5511943870655";
 const COMERCIAL_NOME_FALLBACK = "Carlos Eber";
 
-const ABERTURA_B2 = [
-  "Antes de eu te passar qualquer coisa: com quem eu falo, e de qual empresa?",
-  "Como posso te chamar? E qual a empresa?",
-  "Me diz seu nome e a empresa que eu já te direciono direito.",
+const ABERTURA_NOME = [
+  "Antes de eu te passar qualquer coisa: com quem eu falo?",
+  "Como posso te chamar?",
+  "Me diz seu nome que eu já te direciono direito.",
+];
+
+const ABERTURA_EMPRESA = [
+  "E de qual empresa você fala?",
+  "Qual a empresa?",
+  "Me conta de qual empresa você é.",
 ];
 
 const LGPD =
@@ -150,7 +156,7 @@ function horaLabelSP() {
   }).format(new Date());
 }
 
-/** Mon–Fri 09:00–18:00 America/Sao_Paulo */
+/** Mon–Fri 09:00–20:00 America/Sao_Paulo */
 function statusHorario() {
   const { day, hour, minute } = agoraSP();
   if (day === 0 || day === 6) return "fim_semana";
@@ -957,16 +963,16 @@ async function enviarAberturaComercial(conversa, estado) {
     estado.lgpd_enviado = true;
   }
   await sleep(4000);
-  await responderCliente(conversa.id, conversa.wa_id, pick(ABERTURA_B2));
-  estado.passo = "aguardando_nome_empresa";
-  estado.faltando = null;
+  await responderCliente(conversa.id, conversa.wa_id, pick(ABERTURA_NOME));
+  estado.passo = "aguardando_nome";
+  estado.faltando = "nome";
   estado.pediu_faltante = false;
   await persistEstado(conversa, estado, { etapa: 1, status: "bot" });
 }
 
 async function enviarForaHorario(conversa, estado) {
   const msg = fill(
-    "Oi! Aqui é do comercial da FIC Capital. Já são {{hora}} por aqui, então respondo com calma amanhã cedo.\n\nMas adianta uma coisa: é sobre captação, imposto ou receita? Assim eu já chego com a pessoa certa.",
+    "Oi! Aqui é do comercial da FIC Capital. Já são {{hora}} por aqui — nosso atendimento vai até as 20h. Respondo com calma amanhã cedo.\n\nMas adianta uma coisa: é sobre captação, imposto ou receita? Assim eu já chego com a pessoa certa.",
     { hora: horaLabelSP() },
   );
   await responderCliente(conversa.id, conversa.wa_id, msg);
@@ -1000,8 +1006,7 @@ async function enviarFimSemana(conversa, estado) {
 async function enviarDescoberta(conversa, estado) {
   const nome = conversa.nome_cliente;
   const empresa = conversa.empresa;
-  await responderCliente(conversa.id, conversa.wa_id, fill("Prazer, {{nome}}.", { nome }));
-  await sleep(5000);
+  // Saudação com nome já foi enviada na abertura (após o nome)
   await responderCliente(
     conversa.id,
     conversa.wa_id,
@@ -1655,13 +1660,25 @@ async function processarMensagemBot(conversa, texto) {
         await enviarDescoberta(conversa, estado);
         return;
       }
+      if (conversa.nome_cliente) {
+        await responderCliente(conversa.id, conversa.wa_id, pick(ABERTURA_EMPRESA));
+        estado.passo = "aguardando_empresa";
+        estado.faltando = "empresa";
+        estado.pediu_faltante = false;
+        await persistEstado(conversa, estado, {
+          nome_cliente: conversa.nome_cliente,
+          etapa: 1,
+          status: "bot",
+        });
+        return;
+      }
       await enviarAberturaComercial(conversa, estado);
       return;
     }
     await responderCliente(
       conversa.id,
       conversa.wa_id,
-      "Ainda fora do expediente — assim que o time entrar, seguimos de onde paramos.",
+      "Ainda fora do expediente (atendimento até as 20h) — assim que o time entrar, seguimos de onde paramos.",
     );
     return;
   }
@@ -1675,46 +1692,80 @@ async function processarMensagemBot(conversa, texto) {
     return;
   }
 
-  // nome + empresa
-  if (passo === "aguardando_nome_empresa") {
-    const parsed = parseNomeEmpresa(texto, estado);
+  // nome (abertura pediu só o nome)
+  if (passo === "aguardando_nome" || passo === "aguardando_nome_empresa") {
+    const jaTemNome = Boolean(conversa.nome_cliente || estado.nome_parcial);
+    const faltandoPadrao = estado.faltando || (jaTemNome ? "empresa" : "nome");
+    const parsed = parseNomeEmpresa(texto, { ...estado, faltando: faltandoPadrao });
     let nome = parsed.nome || conversa.nome_cliente || estado.nome_parcial;
     let empresa = parsed.empresa || conversa.empresa || estado.empresa_parcial;
 
     if (nome) estado.nome_parcial = nome;
     if (empresa) estado.empresa_parcial = empresa;
 
-    if (!nome && !empresa) {
+    if (!nome) {
       await responderCliente(
         conversa.id,
         conversa.wa_id,
-        "Me passa seu nome e a empresa, por favor — assim eu te direciono direito.",
+        "Me passa só seu nome, por favor — assim eu te direciono direito.",
       );
-      estado.pediu_faltante = true;
-      await persistEstado(conversa, estado);
-      return;
-    }
-    if (!nome) {
-      await responderCliente(conversa.id, conversa.wa_id, "E com quem eu falo?");
       estado.faltando = "nome";
       estado.pediu_faltante = true;
+      estado.passo = "aguardando_nome";
       await persistEstado(conversa, estado, { empresa: empresa || null });
       return;
     }
+
+    const acabouDeReceberNome = !jaTemNome;
+    conversa.nome_cliente = nome;
+    if (acabouDeReceberNome) {
+      await responderCliente(conversa.id, conversa.wa_id, fill("Prazer, {{nome}}.", { nome }));
+    }
+
+    if (empresa) {
+      conversa.empresa = empresa;
+      estado.faltando = null;
+      await persistEstado(conversa, estado, {
+        nome_cliente: nome,
+        empresa,
+        etapa: 2,
+      });
+      if (acabouDeReceberNome) await sleep(2000);
+      await enviarDescoberta(conversa, estado);
+      return;
+    }
+
+    if (acabouDeReceberNome) await sleep(1500);
+    await responderCliente(conversa.id, conversa.wa_id, pick(ABERTURA_EMPRESA));
+    estado.passo = "aguardando_empresa";
+    estado.faltando = "empresa";
+    estado.pediu_faltante = false;
+    await persistEstado(conversa, estado, { nome_cliente: nome, etapa: 1 });
+    return;
+  }
+
+  // empresa (após saudação com nome)
+  if (passo === "aguardando_empresa") {
+    const parsed = parseNomeEmpresa(texto, { ...estado, faltando: "empresa" });
+    let empresa = parsed.empresa || conversa.empresa || estado.empresa_parcial;
+    if (parsed.nome && !conversa.nome_cliente) {
+      estado.nome_parcial = parsed.nome;
+      conversa.nome_cliente = parsed.nome;
+    }
+
     if (!empresa) {
       await responderCliente(conversa.id, conversa.wa_id, "E de qual empresa?");
       estado.faltando = "empresa";
       estado.pediu_faltante = true;
-      await persistEstado(conversa, estado, { nome_cliente: nome });
-      conversa.nome_cliente = nome;
+      await persistEstado(conversa, estado);
       return;
     }
 
-    conversa.nome_cliente = nome;
     conversa.empresa = empresa;
+    estado.empresa_parcial = empresa;
     estado.faltando = null;
     await persistEstado(conversa, estado, {
-      nome_cliente: nome,
+      nome_cliente: conversa.nome_cliente || estado.nome_parcial || null,
       empresa,
       etapa: 2,
     });
