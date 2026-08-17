@@ -4,7 +4,8 @@
 // Funil: abertura → descoberta → rotas A–H (PRO/SEC/RADAR/SIG/SEE/Advisor/Base/Fallback)
 // Env: WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, WEBHOOK_SECRET
 // Opcional: OPENAI_API_KEY (Whisper + TTS + theme_guess fallback)
-//          LINK_AGENDA, LINK_AGENDA_ADVISOR, FIC_COMERCIAL_WA, FIC_COMERCIAL_NOME
+//          FIC_COMERCIAL_WA, FIC_COMERCIAL_NOME
+// Agenda: lead escolhe dia (seg–sex) e horário (10h–18h); sem Calendly.
 // ============================================================
 
 const TTS_VOICE = "nova";
@@ -18,9 +19,9 @@ const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 const TZ = "America/Sao_Paulo";
 const BH_START = 9;
 const BH_END = 20; // exclusivo → atendimento até 20:00 America/Sao_Paulo
+const AGENDA_HORA_INI = 10;
+const AGENDA_HORA_FIM = 18;
 
-const LINK_AGENDA_FALLBACK = "CONFIGURE_LINK_AGENDA";
-const LINK_AGENDA_ADVISOR_FALLBACK = "CONFIGURE_LINK_AGENDA_ADVISOR";
 const COMERCIAL_WA_FALLBACK = "551151946830";
 const COMERCIAL_NOME_FALLBACK = "Giovanna";
 
@@ -122,14 +123,6 @@ function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function linkAgenda() {
-  return process.env.LINK_AGENDA || LINK_AGENDA_FALLBACK;
-}
-
-function linkAgendaAdvisor() {
-  return process.env.LINK_AGENDA_ADVISOR || LINK_AGENDA_ADVISOR_FALLBACK;
-}
-
 function comercialInfo() {
   return {
     especialistaWa: (process.env.FIC_COMERCIAL_WA || COMERCIAL_WA_FALLBACK).replace(/\D/g, ""),
@@ -144,6 +137,69 @@ function fill(tpl, vars = {}) {
     const v = vars[k];
     return v == null || v === "" ? "" : String(v);
   });
+}
+
+/** Extrai dia útil (seg–sex) da mensagem. Retorna { ok, label, invalido }. */
+function extrairDiaAgenda(texto) {
+  const t = norm(texto);
+  if (!t) return { ok: false };
+  if (/\b(sabado|domingo)\b/.test(t)) {
+    return { ok: false, invalido: true, motivo: "fim_semana" };
+  }
+  const mapa = [
+    [/\b(segunda(?:\s*-?\s*feira)?|seg\.?)\b/, "segunda-feira"],
+    [/\b(terca(?:\s*-?\s*feira)?|terça(?:\s*-?\s*feira)?|ter\.?)\b/, "terça-feira"],
+    [/\b(quarta(?:\s*-?\s*feira)?|qua\.?)\b/, "quarta-feira"],
+    [/\b(quinta(?:\s*-?\s*feira)?|qui\.?)\b/, "quinta-feira"],
+    [/\b(sexta(?:\s*-?\s*feira)?|sex\.?)\b/, "sexta-feira"],
+  ];
+  for (const [re, label] of mapa) {
+    if (re.test(t)) return { ok: true, label };
+  }
+  if (/\bamanha\b/.test(t)) return { ok: true, label: "amanhã" };
+  if (/\bhoje\b/.test(t)) return { ok: true, label: "hoje" };
+  return { ok: false };
+}
+
+/**
+ * Extrai horário ou janela entre 10h e 18h.
+ * Retorna { ok, label, invalido }.
+ */
+function extrairHoraAgenda(texto) {
+  const t = norm(texto);
+  if (!t) return { ok: false };
+
+  if (/\bmanha\b/.test(t)) return { ok: true, label: "manhã (10h–12h)" };
+  if (/\btarde\b/.test(t)) return { ok: true, label: "tarde (13h–18h)" };
+
+  // janela "das 14 às 16" / "entre 10 e 12"
+  const janela = t.match(
+    /(?:das?|entre|de)\s+([01]?\d|2[0-3])\s*h?\s*(?:as|ate|até|a|-|e)\s*([01]?\d|2[0-3])\s*h?/,
+  );
+  if (janela) {
+    const a = Number(janela[1]);
+    const b = Number(janela[2]);
+    if (a >= AGENDA_HORA_INI && b <= AGENDA_HORA_FIM && a <= b) {
+      return { ok: true, label: `${a}h–${b}h` };
+    }
+    return { ok: false, invalido: true, motivo: "fora_janela", raw: `${a}h–${b}h` };
+  }
+
+  // "14h", "14:30", "14.00", "as 14", "14 hs"
+  const m = t.match(
+    /(?:\bas\s+)?([01]?\d|2[0-3])(?:\s*[:h\.]\s*([0-5]\d))?\s*(?:h|hs|hrs)?\b/,
+  );
+  if (m) {
+    const h = Number(m[1]);
+    const min = m[2] != null ? Number(m[2]) : 0;
+    const label = min ? `${h}h${String(min).padStart(2, "0")}` : `${h}h`;
+    if (h < AGENDA_HORA_INI || h > AGENDA_HORA_FIM || (h === AGENDA_HORA_FIM && min > 0)) {
+      return { ok: false, invalido: true, motivo: "fora_janela", raw: label };
+    }
+    return { ok: true, label };
+  }
+
+  return { ok: false };
 }
 
 function agoraSP() {
@@ -1189,13 +1245,80 @@ async function iniciarRota(conversa, estado, rota) {
   });
 }
 
-async function aposAgenda(conversa, estado, respostaAgenda) {
+async function pedirPreferenciaAgenda(conversa, estado) {
+  await responderCliente(
+    conversa.id,
+    conversa.wa_id,
+    "Prefere qual dia, de segunda a sexta?",
+  );
+  await sleep(1500);
+  await responderCliente(
+    conversa.id,
+    conversa.wa_id,
+    "E qual horário fica melhor pra você, entre 10h e 18h?",
+  );
+  estado.passo = "agenda_coleta";
+  estado.agenda_retry = false;
+  await persistEstado(conversa, estado);
+}
+
+async function confirmarAgendaEHandoff(conversa, estado, diaLabel, horaLabel, bruto) {
+  const nome = conversa.nome_cliente || estado.nome_parcial || "você";
+  const dia = diaLabel || "o dia que você passou";
+  const hora = horaLabel || "o horário que você passou";
   estado.respostas = estado.respostas || {};
-  estado.respostas.agenda_preferencia = String(respostaAgenda || "").slice(0, 200);
-  const link = estado.rota === "F" ? linkAgendaAdvisor() : linkAgenda();
-  await responderCliente(conversa.id, conversa.wa_id, link);
+  estado.respostas.agenda_dia = diaLabel || bruto || "—";
+  estado.respostas.agenda_hora = horaLabel || bruto || "—";
+  estado.respostas.agenda_preferencia = [diaLabel, horaLabel].filter(Boolean).join(" · ") || String(bruto || "").slice(0, 200);
+  if (bruto) estado.respostas.agenda_bruta = String(bruto).slice(0, 200);
+
+  await responderCliente(
+    conversa.id,
+    conversa.wa_id,
+    fill(
+      "Fechado, {{nome}}. ✅ {{dia}}, {{hora}} — 30 minutos, por vídeo. O time já recebe o contexto e te confirma. Se travar alguma coisa, me avisa aqui que a gente remarca sem drama.",
+      { nome, dia, hora },
+    ),
+  );
   await sleep(1500);
   await handoffHumano(conversa, estado, "agenda");
+}
+
+async function processarAgendaColeta(conversa, estado, texto) {
+  estado.respostas = estado.respostas || {};
+  const bruto = String(texto || "").trim().slice(0, 200);
+  estado.respostas.agenda_bruta = bruto;
+
+  const diaParse = extrairDiaAgenda(texto);
+  const horaParse = extrairHoraAgenda(texto);
+
+  if (diaParse.ok) estado.respostas.agenda_dia = diaParse.label;
+  if (horaParse.ok) estado.respostas.agenda_hora = horaParse.label;
+
+  const dia = estado.respostas.agenda_dia || null;
+  const hora = estado.respostas.agenda_hora || null;
+  const invalido = Boolean(diaParse.invalido || horaParse.invalido);
+  const incompleto = !dia || !hora;
+
+  if ((invalido || incompleto) && !estado.agenda_retry) {
+    estado.agenda_retry = true;
+    let msg =
+      "Só pra eu deixar redondo: me passa um dia de segunda a sexta e um horário entre 10h e 18h.";
+    if (diaParse.invalido) {
+      msg = "Nosso diagnóstico é de segunda a sexta. Qual dia da semana fica melhor pra você?";
+    } else if (horaParse.invalido) {
+      msg = "O horário precisa ficar entre 10h e 18h. Qual horário funciona melhor pra você?";
+    } else if (dia && !hora) {
+      msg = "E qual horário fica melhor pra você, entre 10h e 18h?";
+    } else if (hora && !dia) {
+      msg = "Prefere qual dia, de segunda a sexta?";
+    }
+    await responderCliente(conversa.id, conversa.wa_id, msg);
+    await persistEstado(conversa, estado);
+    return;
+  }
+
+  await confirmarAgendaEHandoff(conversa, estado, dia, hora, bruto);
 }
 
 async function processarRota(conversa, estado, texto) {
@@ -1235,14 +1358,10 @@ async function processarRota(conversa, estado, texto) {
     await responderCliente(
       conversa.id,
       conversa.wa_id,
-      "Perfeito. Já tenho o suficiente pra abrir o diagnóstico gratuito — é a leitura jurídica, contábil e fiscal da operação, sem custo e sem compromisso.\n\nSão 30 minutos. Prefere ainda esta semana ou na que vem?",
+      "Perfeito. Já tenho o suficiente pra abrir o diagnóstico gratuito — é a leitura jurídica, contábil e fiscal da operação, sem custo e sem compromisso.\n\nSão 30 minutos.",
     );
-    estado.passo = "A.5";
-    await persistEstado(conversa, estado);
-    return;
-  }
-  if (passo === "A.5") {
-    await aposAgenda(conversa, estado, texto);
+    await sleep(2000);
+    await pedirPreferenciaAgenda(conversa, estado);
     return;
   }
 
@@ -1274,14 +1393,10 @@ async function processarRota(conversa, estado, texto) {
     await responderCliente(
       conversa.id,
       conversa.wa_id,
-      "Ótimo. Com isso o time já monta a leitura preliminar.\n\nO caminho é o diagnóstico gratuito, 30 minutos — e em até 24h úteis você recebe o plano de ação com escopo e prazo.\n\nMelhor de manhã ou à tarde?",
+      "Ótimo. Com isso o time já monta a leitura preliminar.\n\nO caminho é o diagnóstico gratuito, 30 minutos — e em até 24h úteis você recebe o plano de ação com escopo e prazo.",
     );
-    estado.passo = "B.5";
-    await persistEstado(conversa, estado);
-    return;
-  }
-  if (passo === "B.5") {
-    await aposAgenda(conversa, estado, texto);
+    await sleep(2000);
+    await pedirPreferenciaAgenda(conversa, estado);
     return;
   }
 
@@ -1352,12 +1467,12 @@ async function processarRota(conversa, estado, texto) {
       conversa.id,
       conversa.wa_id,
       fill(
-        "Perfeito, {{nome}}. Nossos protocolos são validados por ex-procuradores e ex-auditores — gente que já esteve do outro lado do balcão. Nesse tipo de tese isso pesa.\n\nVou abrir o diagnóstico gratuito pra você. Consegue 30 minutos esta semana?",
+        "Perfeito, {{nome}}. Nossos protocolos são validados por ex-procuradores e ex-auditores — gente que já esteve do outro lado do balcão. Nesse tipo de tese isso pesa.\n\nVou abrir o diagnóstico gratuito pra você — 30 minutos.",
         { nome },
       ),
     );
-    estado.passo = "C.5";
-    await persistEstado(conversa, estado);
+    await sleep(2000);
+    await pedirPreferenciaAgenda(conversa, estado);
     return;
   }
   if (passo === "C.4") {
@@ -1377,16 +1492,12 @@ async function processarRota(conversa, estado, texto) {
       conversa.id,
       conversa.wa_id,
       fill(
-        "Perfeito, {{nome}}. Nossos protocolos são validados por ex-procuradores e ex-auditores — gente que já esteve do outro lado do balcão. Nesse tipo de tese isso pesa.\n\nVou abrir o diagnóstico gratuito pra você. Consegue 30 minutos esta semana?",
+        "Perfeito, {{nome}}. Nossos protocolos são validados por ex-procuradores e ex-auditores — gente que já esteve do outro lado do balcão. Nesse tipo de tese isso pesa.\n\nVou abrir o diagnóstico gratuito pra você — 30 minutos.",
         { nome },
       ),
     );
-    estado.passo = "C.5";
-    await persistEstado(conversa, estado);
-    return;
-  }
-  if (passo === "C.5") {
-    await aposAgenda(conversa, estado, texto);
+    await sleep(2000);
+    await pedirPreferenciaAgenda(conversa, estado);
     return;
   }
 
@@ -1408,16 +1519,12 @@ async function processarRota(conversa, estado, texto) {
       conversa.id,
       conversa.wa_id,
       fill(
-        "Certo. O time faz uma demonstração de 30 minutos já com o cenário da {{empresa}}.\n\nTe mando os horários?",
+        "Certo. O time faz uma demonstração de 30 minutos já com o cenário da {{empresa}}.",
         { empresa },
       ),
     );
-    estado.passo = "D.4";
-    await persistEstado(conversa, estado);
-    return;
-  }
-  if (passo === "D.4") {
-    await aposAgenda(conversa, estado, texto);
+    await sleep(2000);
+    await pedirPreferenciaAgenda(conversa, estado);
     return;
   }
 
@@ -1445,7 +1552,7 @@ async function processarRota(conversa, estado, texto) {
       await persistEstado(conversa, estado);
       return;
     }
-    await aposAgenda(conversa, estado, texto);
+    await pedirPreferenciaAgenda(conversa, estado);
     return;
   }
   if (passo === "E.4") {
@@ -1465,7 +1572,7 @@ async function processarRota(conversa, estado, texto) {
       });
       return;
     }
-    await aposAgenda(conversa, estado, texto);
+    await pedirPreferenciaAgenda(conversa, estado);
     return;
   }
 
@@ -1498,14 +1605,12 @@ async function processarRota(conversa, estado, texto) {
       conversa.id,
       conversa.wa_id,
       fill(
-        "Bom perfil, {{nome}}. Vou te encaminhar pro time de credenciamento.\n\nEles fazem uma apresentação de 30 minutos com o modelo completo, condições e território disponível na sua região.\n\nAgenda aqui: {{link}}",
-        { nome, link: linkAgendaAdvisor() },
+        "Bom perfil, {{nome}}. Vou te encaminhar pro time de credenciamento.\n\nEles fazem uma apresentação de 30 minutos com o modelo completo, condições e território disponível na sua região.",
+        { nome },
       ),
     );
-    estado.passo = "F.5";
-    await persistEstado(conversa, estado);
     await sleep(2000);
-    await handoffHumano(conversa, estado, "advisor");
+    await pedirPreferenciaAgenda(conversa, estado);
     return;
   }
 
@@ -1830,6 +1935,19 @@ async function processarMensagemBot(conversa, texto) {
       return;
     }
     await processarIntencao(conversa, estado, texto);
+    return;
+  }
+
+  // coleta de dia/horário (após fechamento A–F) + passos legados de agenda
+  if (
+    passo === "agenda_coleta" ||
+    passo === "A.5" ||
+    passo === "B.5" ||
+    passo === "C.5" ||
+    passo === "D.4"
+  ) {
+    estado.passo = "agenda_coleta";
+    await processarAgendaColeta(conversa, estado, texto);
     return;
   }
 

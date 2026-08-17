@@ -30,10 +30,10 @@ Variaveis no projeto `rotea-webhook`:
 - `VERIFY_TOKEN` — palavra secreta do webhook (ex.: `rotea_wa_verify_2026_fic`)
 - `WEBHOOK_SECRET` — mesmo valor do VERIFY_TOKEN (protege as RPCs no Supabase)
 - `OPENAI_API_KEY` — opcional (Whisper, TTS, theme_guess no fallback)
-- `LINK_AGENDA` — link Calendly/agenda do diagnostico (fallback: `CONFIGURE_LINK_AGENDA`)
-- `LINK_AGENDA_ADVISOR` — agenda do Programa Advisor (fallback: `CONFIGURE_LINK_AGENDA_ADVISOR`)
-- `FIC_COMERCIAL_WA` — WhatsApp do comercial para handoff (fallback: Carlos Eber)
-- `FIC_COMERCIAL_NOME` — nome exibido no handoff (fallback: `Carlos Eber`)
+- `FIC_COMERCIAL_WA` — WhatsApp do comercial para handoff (fallback: Giovanna)
+- `FIC_COMERCIAL_NOME` — nome exibido no handoff (fallback: `Giovanna`)
+
+No fechamento das rotas A–F o bot pede dia (seg–sex) e horário (10h–18h), confirma e faz handoff — sem link Calendly.
 
 WhatsApp Business Account ID: `1206658925872309`
 
