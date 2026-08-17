@@ -115,3 +115,77 @@ export async function simularLive(sb: SupabaseClient): Promise<boolean> {
     return false;
   }
 }
+
+export interface BotPerfilWA {
+  telefone: string | null;
+  verified_name: string | null;
+  name_status: string | null;
+  quality_rating: string | null;
+  nome_exibicao_somente_leitura: boolean;
+  aviso_nome: string;
+  perfil: {
+    about: string;
+    address: string;
+    description: string;
+    email: string;
+    websites: string[];
+    vertical: string;
+    profile_picture_url: string | null;
+  };
+}
+
+async function tokenAuth(sb: SupabaseClient) {
+  const { data } = await sb.auth.getSession();
+  return data.session?.access_token ?? "";
+}
+
+export async function buscarBotPerfil(sb: SupabaseClient): Promise<BotPerfilWA> {
+  const token = await tokenAuth(sb);
+  const r = await fetch(`${WEBHOOK_BASE}/api/bot-perfil`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.erro || j.detalhe || "falha ao carregar perfil do WhatsApp");
+  return j as BotPerfilWA;
+}
+
+export async function salvarBotPerfil(
+  sb: SupabaseClient,
+  campos: Partial<{
+    about: string;
+    address: string;
+    description: string;
+    email: string;
+    websites: string[];
+    vertical: string;
+  }>,
+): Promise<void> {
+  const token = await tokenAuth(sb);
+  const r = await fetch(`${WEBHOOK_BASE}/api/bot-perfil`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(campos),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.erro || j.detalhe || "falha ao salvar perfil do WhatsApp");
+}
+
+export async function salvarBotPerfilFoto(sb: SupabaseClient, arquivo: File): Promise<void> {
+  const token = await tokenAuth(sb);
+  const buf = await arquivo.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const imagem_base64 = btoa(bin);
+  const r = await fetch(`${WEBHOOK_BASE}/api/bot-perfil-foto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      imagem_base64,
+      mime_type: arquivo.type || "image/jpeg",
+      file_name: arquivo.name || "perfil.jpg",
+    }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.erro || j.detalhe || "falha ao enviar foto do WhatsApp");
+}

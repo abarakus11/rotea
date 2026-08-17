@@ -50,7 +50,11 @@ Diagnostico: `https://rotea-webhook.vercel.app/api/status`
 - `GET/POST /api/webhook` — recebe mensagens da Meta e executa o fluxo do bot
 - `POST /api/enviar` — resposta do atendente (autenticado) para o cliente
 - `POST /api/simular` — cria conversa de teste no banco para treino da equipe
+- `GET/POST /api/bot-perfil` — ler/atualizar perfil comercial do WhatsApp (só Administrador)
+- `POST /api/bot-perfil-foto` — foto do perfil via Resumable Upload da Meta (só Administrador)
 - `GET /api/status` — checagem das credenciais
+
+Opcional no webhook: `META_APP_ID` (App ID do Facebook) — se ausente, o upload de foto tenta obter via `debug_token`.
 
 ## Banco de dados
 

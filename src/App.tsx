@@ -361,6 +361,7 @@ export default function App() {
               setUsuarios={setUsuariosDemo}
               chats={chatsAtivos}
               modoAuth={modoAuth}
+              sb={sb}
               onRemover={removerDaEquipe}
             />
           )}
