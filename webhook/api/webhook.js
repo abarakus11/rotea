@@ -95,6 +95,21 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Race com timeout — nunca deixa TTS/STT travar o handler. */
+async function withTimeout(promise, ms, label = "op") {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}_timeout_${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function norm(texto) {
   return String(texto || "")
     .toLowerCase()
@@ -505,14 +520,25 @@ async function transcreverGroq(buffer, mimeType) {
 }
 
 async function transcreverAudio(buffer, mimeType) {
-  const openai = await transcreverOpenAI(buffer, mimeType);
-  if (openai.text) return openai;
-  if (openai.error === "quota" || openai.error === "auth" || openai.error === "missing_key") {
-    const groq = await transcreverGroq(buffer, mimeType);
-    if (groq.text) return groq;
-    if (groq.error && groq.error !== "missing_key") return groq;
+  try {
+    return await withTimeout(
+      (async () => {
+        const openai = await transcreverOpenAI(buffer, mimeType);
+        if (openai.text) return openai;
+        if (openai.error === "quota" || openai.error === "auth" || openai.error === "missing_key") {
+          const groq = await transcreverGroq(buffer, mimeType);
+          if (groq.text) return groq;
+          if (groq.error && groq.error !== "missing_key") return groq;
+        }
+        return openai;
+      })(),
+      15000,
+      "whisper",
+    );
+  } catch (e) {
+    console.error("whisper soft-fail", e?.message || e);
+    return { text: null, error: "timeout" };
   }
-  return openai;
 }
 
 function extrairAudioMsg(msg) {
@@ -555,25 +581,29 @@ async function gerarAudioTTS(texto) {
   const input = textoParaTTS(texto);
   if (!key || !input) return null;
   try {
-    const r = await fetch("https://api.openai.com/v1/audio/speech", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: TTS_MODEL,
-        voice: TTS_VOICE,
-        input,
-        response_format: "mp3",
+    const r = await withTimeout(
+      fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: TTS_MODEL,
+          voice: TTS_VOICE,
+          input,
+          response_format: "mp3",
+        }),
       }),
-    });
+      8000,
+      "tts_fetch",
+    );
     if (!r.ok) {
       const errBody = await r.text();
       console.error("tts fail", r.status, errBody);
       return null;
     }
-    const buffer = Buffer.from(await r.arrayBuffer());
+    const buffer = Buffer.from(await withTimeout(r.arrayBuffer(), 8000, "tts_body"));
     if (!buffer.length) return null;
     return { buffer, mime: "audio/mpeg", ext: "mp3" };
   } catch (e) {
@@ -669,6 +699,9 @@ async function enviarRespostaAudio(conversaId, waId, texto) {
   }
 }
 
+/** TTS best-effort: nunca bloqueia a resposta de texto além de TTS_SOFT_MS. */
+const TTS_SOFT_MS = 12000;
+
 async function atualizarConversa(id, patch) {
   await rpc("wa_atualizar_conversa", {
     p_secret: secret(),
@@ -716,20 +749,29 @@ async function enviarWhatsApp(para, texto) {
 
 async function responderCliente(conversaId, waId, texto) {
   const envio = await enviarWhatsApp(waId, texto);
-  const audio = envio.ok ? await enviarRespostaAudio(conversaId, waId, texto) : null;
-  if (audio?.mediaUrl) {
-    await salvarMsg(conversaId, "bot", texto, {
-      tipo: "audio",
-      media_url: audio.mediaUrl,
-      mime_type: audio.mime || "audio/mpeg",
-      wa_media_id: audio.mediaId || null,
-    });
-  } else {
-    await salvarMsg(conversaId, "bot", texto);
-  }
+  // Persiste texto imediatamente — resposta de texto nunca depende de TTS/STT.
+  await salvarMsg(conversaId, "bot", texto);
   if (!envio.ok) {
     await salvarMsg(conversaId, "sistema", "Falha ao enviar no WhatsApp: verifique token e Phone Number ID.");
+    return envio;
   }
+
+  // TTS fail-soft / non-blocking: não atrasa a próxima mensagem do funil.
+  void (async () => {
+    try {
+      const audio = await withTimeout(
+        enviarRespostaAudio(conversaId, waId, texto),
+        TTS_SOFT_MS,
+        "tts_pipeline",
+      );
+      if (audio?.mediaUrl) {
+        await salvarMsg(conversaId, "sistema", `Áudio TTS enviado · ${audio.mediaId || ""}`.trim());
+      }
+    } catch (e) {
+      console.error("tts soft-fail (texto já enviado)", e?.message || e);
+    }
+  })();
+
   return envio;
 }
 
@@ -1563,32 +1605,41 @@ async function processarIntencao(conversa, estado, texto) {
   await processarFallback(conversa, estado, texto);
 }
 
+async function reiniciarFluxoCompleto(conversa) {
+  // Toda vez que a pessoa fala oi/olá: zera handoff/fila/andamento e reabre do zero.
+  const estado = {};
+  await atualizarConversa(conversa.id, {
+    nome_cliente: null,
+    empresa: null,
+    assunto: null,
+    setor: null,
+    atendente_id: null,
+    etapa: 0,
+    status: "bot",
+    bot_estado: estado,
+  });
+  conversa.nome_cliente = null;
+  conversa.empresa = null;
+  conversa.assunto = null;
+  conversa.setor = null;
+  conversa.atendente_id = null;
+  conversa.status = "bot";
+  conversa.etapa = 0;
+  conversa.bot_estado = estado;
+  await salvarMsg(conversa.id, "sistema", "Fluxo FIC Capital reiniciado pelo cliente (oi/olá)");
+  return estado;
+}
+
 async function processarMensagemBot(conversa, texto) {
   let estado = getEstado(conversa);
   const horario = statusHorario();
 
-  // reinício
-  if (ehReinicio(texto) && estado.passo && estado.passo !== "inicio") {
-    estado = { lgpd_enviado: Boolean(estado.lgpd_enviado) };
-    await atualizarConversa(conversa.id, {
-      nome_cliente: null,
-      empresa: null,
-      assunto: null,
-      setor: null,
-      atendente_id: null,
-      etapa: 0,
-      status: "bot",
-      bot_estado: estado,
-    });
-    conversa.nome_cliente = null;
-    conversa.empresa = null;
-    conversa.status = "bot";
-    conversa.etapa = 0;
-    conversa.bot_estado = estado;
-    await salvarMsg(conversa.id, "sistema", "Fluxo FIC Capital reiniciado pelo cliente");
+  // Sempre reinicia em oi/olá — inclusive fila, handoff, andamento e bot_estado vazio.
+  if (ehReinicio(texto)) {
+    estado = await reiniciarFluxoCompleto(conversa);
   }
 
-  // humano já assumiu
+  // humano já assumiu (só se NÃO for reinício — reinício já voltou status p/ bot)
   if (conversa.status !== "bot" && estado.passo === "handoff") {
     return;
   }
